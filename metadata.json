@@ -1,0 +1,7 @@
+{
+  "name": "OmniChat Mobile",
+  "description": "移动端多API兼容会话平台，支持自定义Agent、提示词库、窗口分组、AI消息显隐控制与分支重Roll回溯。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
