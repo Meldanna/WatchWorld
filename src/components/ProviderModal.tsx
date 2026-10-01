@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { ApiProviderConfig, ProviderType } from '../types';
-import { testProviderConnection } from '../lib/api';
+import { testProviderConnection, fetchModelsFromProvider } from '../lib/api';
 import {
   Key,
   Plus,
@@ -16,6 +16,8 @@ import {
   Activity,
   AlertCircle,
   CheckCircle2,
+  RefreshCw,
+  ChevronDown,
 } from 'lucide-react';
 
 interface ProviderModalProps {
@@ -56,6 +58,25 @@ export const ProviderModal: React.FC<ProviderModalProps> = ({
   const [defaultModel, setDefaultModel] = useState('');
   const [customHeadersStr, setCustomHeadersStr] = useState('');
 
+  // Fetch-models states
+  const [fetchingModels, setFetchingModels] = useState(false);
+  const [fetchedModels, setFetchedModels] = useState<string[]>([]);
+  const [fetchModelError, setFetchModelError] = useState('');
+  const [showModelDropdown, setShowModelDropdown] = useState(false);
+  const [modelSearch, setModelSearch] = useState('');
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    function handleOutside(e: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setShowModelDropdown(false);
+      }
+    }
+    if (showModelDropdown) document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, [showModelDropdown]);
+
   if (!isOpen) return null;
 
   const toggleShowKey = (id: string) => {
@@ -72,6 +93,10 @@ export const ProviderModal: React.FC<ProviderModalProps> = ({
     setModelsStr('gpt-4o, gpt-4o-mini');
     setDefaultModel('gpt-4o-mini');
     setCustomHeadersStr('');
+    setFetchedModels([]);
+    setFetchModelError('');
+    setShowModelDropdown(false);
+    setModelSearch('');
   };
 
   const startEdit = (p: ApiProviderConfig) => {
@@ -84,6 +109,10 @@ export const ProviderModal: React.FC<ProviderModalProps> = ({
     setModelsStr(p.models.join(', '));
     setDefaultModel(p.defaultModel);
     setCustomHeadersStr(p.customHeaders ? JSON.stringify(p.customHeaders, null, 2) : '');
+    setFetchedModels([]);
+    setFetchModelError('');
+    setShowModelDropdown(false);
+    setModelSearch('');
   };
 
   const handleSaveForm = (e: React.FormEvent) => {
@@ -136,6 +165,62 @@ export const ProviderModal: React.FC<ProviderModalProps> = ({
     setTestResults((prev) => ({ ...prev, [p.id]: result }));
     setTestingId(null);
   };
+
+  // Build a temporary provider config from current form values for fetching
+  const buildTempProvider = (): ApiProviderConfig => {
+    let parsedHeaders: Record<string, string> | undefined;
+    if (customHeadersStr.trim()) {
+      try { parsedHeaders = JSON.parse(customHeadersStr.trim()); } catch { parsedHeaders = undefined; }
+    }
+    return {
+      id: 'temp',
+      name,
+      type,
+      baseUrl: baseUrl.trim(),
+      apiKey: apiKey.trim(),
+      models: [],
+      defaultModel: '',
+      customHeaders: parsedHeaders,
+    };
+  };
+
+  const handleFetchModels = async () => {
+    setFetchingModels(true);
+    setFetchModelError('');
+    setFetchedModels([]);
+    setShowModelDropdown(false);
+
+    const temp = buildTempProvider();
+    const result = await fetchModelsFromProvider(temp);
+
+    setFetchingModels(false);
+    if (result.error) {
+      setFetchModelError(result.error);
+    } else if (result.models.length === 0) {
+      setFetchModelError('未获取到任何模型，请检查 API Key 和 Base URL');
+    } else {
+      setFetchedModels(result.models);
+      setShowModelDropdown(true);
+      setModelSearch('');
+    }
+  };
+
+  const handleSelectModel = (modelId: string) => {
+    setDefaultModel(modelId);
+    // Add to models list if not already present
+    const current = modelsStr
+      .split(/[,，\s]+/)
+      .map((m) => m.trim())
+      .filter(Boolean);
+    if (!current.includes(modelId)) {
+      setModelsStr(current.length > 0 ? current.join(', ') + ', ' + modelId : modelId);
+    }
+    setShowModelDropdown(false);
+  };
+
+  const filteredModels = fetchedModels.filter((m) =>
+    m.toLowerCase().includes(modelSearch.toLowerCase())
+  );
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
@@ -221,7 +306,7 @@ export const ProviderModal: React.FC<ProviderModalProps> = ({
                   <option value="openai">OpenAI 格式</option>
                   <option value="deepseek">DeepSeek 深度求索</option>
                   <option value="claude">Anthropic Claude</option>
-                  <option value="openrouter">OpenRouter 聚合</option>
+                  <option value="openrouter">OpenRouter 汇聚</option>
                   <option value="groq">Groq 极速</option>
                   <option value="ollama">Ollama 本地/自建</option>
                   <option value="custom">通用兼容 (Custom)</option>
@@ -241,7 +326,7 @@ export const ProviderModal: React.FC<ProviderModalProps> = ({
                 className="w-full bg-slate-950 p-2.5 rounded-xl border border-slate-700 focus:outline-none focus:border-emerald-500 text-slate-100 font-mono text-[11px]"
               />
               <span className="text-[10px] text-slate-500 mt-1 block">
-                Google Gemini 可留空（默认走智能云代理或直连）
+                Google Gemini 可置空（默认走官方接口）
               </span>
             </div>
 
@@ -257,51 +342,143 @@ export const ProviderModal: React.FC<ProviderModalProps> = ({
                 className="w-full bg-slate-950 p-2.5 rounded-xl border border-slate-700 focus:outline-none focus:border-emerald-500 text-slate-100 font-mono text-[11px]"
               />
               <span className="text-[10px] text-slate-500 mt-1 block">
-                所有密钥均保存在本地浏览器端安全沙箱，不上传任何第三方数据库。
+                所有密钥仅保存在本地浏览器端安全沙箱，不会传任何第三方数据库。
               </span>
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="block text-[11px] text-slate-400 mb-1">
-                  默认选用模型
-                </label>
+            {/* 模型配置区域 */}
+            <div className="space-y-2">
+              <label className="block text-[11px] text-slate-400">
+                默认使用模型
+              </label>
+
+              {/* 模型输入行 + 获取按钮 */}
+              <div className="flex gap-2 items-center">
                 <input
                   type="text"
                   value={defaultModel}
                   onChange={(e) => setDefaultModel(e.target.value)}
                   placeholder="例如：gpt-4o-mini"
-                  className="w-full bg-slate-950 p-2 rounded-xl border border-slate-700 focus:outline-none focus:border-emerald-500 text-slate-100 font-mono text-[11px]"
+                  className="flex-1 bg-slate-950 p-2 rounded-xl border border-slate-700 focus:outline-none focus:border-emerald-500 text-slate-100 font-mono text-[11px]"
                 />
+                <button
+                  type="button"
+                  onClick={handleFetchModels}
+                  disabled={fetchingModels}
+                  title="从 API 拉取可用模型列表"
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-600/80 hover:bg-indigo-500 text-white text-[11px] font-medium border border-indigo-500/50 disabled:opacity-50 disabled:cursor-not-allowed shrink-0 transition-colors"
+                >
+                  <RefreshCw size={12} className={fetchingModels ? 'animate-spin' : ''} />
+                  {fetchingModels ? '拉取中...' : '获取模型'}
+                </button>
               </div>
 
-              <div>
-                <label className="block text-[11px] text-slate-400 mb-1">
-                  可用模型列表 (逗号分隔)
-                </label>
-                <input
-                  type="text"
-                  value={modelsStr}
-                  onChange={(e) => setModelsStr(e.target.value)}
-                  placeholder="gpt-4o, gpt-4o-mini"
-                  className="w-full bg-slate-950 p-2 rounded-xl border border-slate-700 focus:outline-none focus:border-emerald-500 text-slate-100 font-mono text-[11px]"
-                />
-              </div>
+              {/* 错误提示 */}
+              {fetchModelError && (
+                <div className="flex items-start gap-1.5 text-[11px] text-rose-400 bg-rose-950/30 border border-rose-500/30 rounded-lg px-2.5 py-2">
+                  <AlertCircle size={12} className="shrink-0 mt-0.5" />
+                  <span>{fetchModelError}</span>
+                </div>
+              )}
+
+              {/* 模型下拉列表 */}
+              {showModelDropdown && fetchedModels.length > 0 && (
+                <div ref={dropdownRef} className="relative z-20">
+                  <div className="bg-slate-950 border border-slate-700 rounded-xl shadow-xl overflow-hidden">
+                    {/* 搜索框 */}
+                    <div className="p-2 border-b border-slate-800">
+                      <input
+                        type="text"
+                        value={modelSearch}
+                        onChange={(e) => setModelSearch(e.target.value)}
+                        placeholder={`搜索 ${fetchedModels.length} 个模型...`}
+                        autoFocus
+                        className="w-full bg-slate-900 px-2.5 py-1.5 rounded-lg text-[11px] text-slate-200 placeholder:text-slate-500 border border-slate-700 focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
+
+                    {/* 模型列表 */}
+                    <div className="max-h-48 overflow-y-auto">
+                      {filteredModels.length === 0 ? (
+                        <div className="px-3 py-3 text-[11px] text-slate-500 text-center">无匹配模型</div>
+                      ) : (
+                        filteredModels.map((modelId) => (
+                          <button
+                            key={modelId}
+                            type="button"
+                            onClick={() => handleSelectModel(modelId)}
+                            className={`w-full text-left px-3 py-2 text-[11px] font-mono hover:bg-slate-800 transition-colors flex items-center justify-between group ${
+                              defaultModel === modelId
+                                ? 'text-indigo-300 bg-indigo-950/40'
+                                : 'text-slate-300'
+                            }`}
+                          >
+                            <span className="truncate">{modelId}</span>
+                            {defaultModel === modelId && (
+                              <Check size={11} className="text-indigo-400 shrink-0 ml-2" />
+                            )}
+                          </button>
+                        ))
+                      )}
+                    </div>
+
+                    {/* 底部提示 */}
+                    <div className="px-3 py-1.5 border-t border-slate-800 text-[10px] text-slate-500 flex items-center justify-between">
+                      <span>共 {fetchedModels.length} 个可用模型</span>
+                      <button
+                        type="button"
+                        onClick={() => setShowModelDropdown(false)}
+                        className="text-slate-400 hover:text-slate-200"
+                      >
+                        收起
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 成功提示 + 重新展开 */}
+              {!showModelDropdown && fetchedModels.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowModelDropdown(true)}
+                  className="flex items-center gap-1 text-[11px] text-indigo-400 hover:text-indigo-300"
+                >
+                  <ChevronDown size={12} />
+                  已获取 {fetchedModels.length} 个模型，点击重新展开选择
+                </button>
+              )}
             </div>
 
             <div>
               <label className="block text-[11px] text-slate-400 mb-1">
-                自定义请求头 (Headers) - 适配不同中转站
+                可用模型列表 (逗号分隔)
+              </label>
+              <input
+                type="text"
+                value={modelsStr}
+                onChange={(e) => setModelsStr(e.target.value)}
+                placeholder="gpt-4o, gpt-4o-mini"
+                className="w-full bg-slate-950 p-2 rounded-xl border border-slate-700 focus:outline-none focus:border-emerald-500 text-slate-100 font-mono text-[11px]"
+              />
+              <span className="text-[10px] text-slate-500 mt-1 block">
+                点击「获取模型」可自动填充。选中的模型会自动加入此列表。
+              </span>
+            </div>
+
+            <div>
+              <label className="block text-[11px] text-slate-400 mb-1">
+                自定义请求头 (Headers) — 适配中转站
               </label>
               <textarea
                 value={customHeadersStr}
                 onChange={(e) => setCustomHeadersStr(e.target.value)}
-                placeholder={'{\n  "HTTP-Referer": "https://guanjie.app",\n  "X-Title": "观界工作台"\n}'}
+                placeholder={'{ \n  "HTTP-Referer": "https://guanjie.app",\n  "X-Title": "观界工作台"\n}'}
                 rows={3}
                 className="w-full bg-slate-950 p-2 rounded-xl border border-slate-700 focus:outline-none focus:border-emerald-500 text-slate-100 font-mono text-[11px] resize-none"
               />
               <span className="text-[10px] text-slate-500 mt-0.5 block">
-                支持 JSON 格式或每行一条 &quot;Header: Value&quot;，适合聚合站、OneAPI、自建中转认证。
+                支持 JSON 格式或每行一条 &quot;Header: Value&quot;，适配聚合站、OneAPI、自建中转认证。
               </span>
             </div>
 
@@ -328,7 +505,7 @@ export const ProviderModal: React.FC<ProviderModalProps> = ({
           /* List View */
           <div className="flex-1 overflow-y-auto py-3 space-y-2.5">
             <div className="flex items-center justify-between px-1 mb-1">
-              <span className="text-xs text-slate-400">已配置的 API 提供商</span>
+              <span className="text-xs text-slate-400">已配置的 API 提供方</span>
               <button
                 onClick={startCreate}
                 className="flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 font-medium py-1 px-2.5 rounded-lg bg-emerald-950/40 border border-emerald-500/30"
@@ -377,7 +554,7 @@ export const ProviderModal: React.FC<ProviderModalProps> = ({
                           </span>
                           {p.isSystemDefault && (
                             <span className="text-[10px] text-emerald-400 font-mono">
-                              · 内置免配置
+                              · 内置预配置
                             </span>
                           )}
                         </div>
