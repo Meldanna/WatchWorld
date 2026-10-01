@@ -23,6 +23,104 @@ app.get('/api/health', (req: Request, res: Response) => {
   });
 });
 
+// ============================================================
+// /api/models — 拉取各 provider 可用模型列表
+// Body: { provider, apiKey, baseUrl, customHeaders }
+// Returns: { models: string[] }
+// ============================================================
+app.post('/api/models', async (req: Request, res: Response) => {
+  try {
+    const { provider, apiKey, baseUrl, customHeaders } = req.body;
+
+    // 1. Gemini — 使用 @google/genai SDK 列举模型
+    if (provider === 'gemini' || (!provider && !baseUrl)) {
+      const activeKey = apiKey || process.env.GEMINI_API_KEY;
+      if (!activeKey) {
+        return res.status(400).json({ error: '请先配置 Google Gemini API Key' });
+      }
+      // Gemini REST list-models endpoint
+      const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${activeKey}&pageSize=50`;
+      const upstream = await fetch(listUrl, { method: 'GET' });
+      if (!upstream.ok) {
+        const errText = await upstream.text();
+        return res.status(upstream.status).json({ error: `Gemini 模型列表获取失败 (${upstream.status}): ${errText.slice(0, 200)}` });
+      }
+      const data = await upstream.json();
+      const models: string[] = (data.models || [])
+        .map((m: any) => (m.name as string).replace('models/', ''))
+        .filter((id: string) => id.startsWith('gemini'));
+      return res.json({ models });
+    }
+
+    // 2. Claude / Anthropic
+    if (provider === 'claude') {
+      const base = (baseUrl || 'https://api.anthropic.com/v1').replace(/\/+$/, '');
+      const upstream = await fetch(`${base}/models`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey || '',
+          'anthropic-version': '2023-06-01',
+          ...(customHeaders || {}),
+        },
+      });
+      if (!upstream.ok) {
+        const errText = await upstream.text();
+        return res.status(upstream.status).json({ error: `Claude 模型列表获取失败 (${upstream.status}): ${errText.slice(0, 200)}` });
+      }
+      const data = await upstream.json();
+      const models: string[] = (data.data || []).map((m: any) => m.id as string);
+      return res.json({ models });
+    }
+
+    // 3. OpenAI-compatible: openai / deepseek / ollama / openrouter / groq / custom
+    if (
+      provider === 'openai' ||
+      provider === 'deepseek' ||
+      provider === 'ollama' ||
+      provider === 'openrouter' ||
+      provider === 'groq' ||
+      provider === 'custom'
+    ) {
+      const base = (baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...(customHeaders || {}),
+      };
+      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+
+      const upstream = await fetch(`${base}/models`, { method: 'GET', headers });
+      if (!upstream.ok) {
+        const errText = await upstream.text();
+        return res.status(upstream.status).json({ error: `模型列表获取失败 (${upstream.status}): ${errText.slice(0, 200)}` });
+      }
+      const data = await upstream.json();
+
+      // Ollama returns { models: [{name, ...}] }, OpenAI returns { data: [{id, ...}] }
+      let models: string[] = [];
+      if (Array.isArray(data.models)) {
+        models = data.models.map((m: any) => m.name || m.id || m.model || String(m));
+      } else if (Array.isArray(data.data)) {
+        models = data.data.map((m: any) => m.id || m.name || String(m));
+      }
+
+      // For OpenAI official, filter to relevant models only
+      if (provider === 'openai' && !baseUrl) {
+        models = models.filter((id) =>
+          id.startsWith('gpt') || id.startsWith('o1') || id.startsWith('o3') || id.startsWith('chatgpt')
+        );
+      }
+
+      return res.json({ models });
+    }
+
+    return res.status(400).json({ error: `不支持的 provider 类型: ${provider}` });
+  } catch (error: any) {
+    console.error('Models fetch error:', error);
+    return res.status(500).json({ error: error.message || '获取模型列表失败' });
+  }
+});
+
 // Universal AI completion proxy
 app.post('/api/chat', async (req: Request, res: Response) => {
   try {
@@ -44,15 +142,13 @@ app.post('/api/chat', async (req: Request, res: Response) => {
       const activeKey = apiKey || process.env.GEMINI_API_KEY;
       if (!activeKey) {
         return res.status(400).json({
-          error: '请先在设置中填写 Google Gemini API Key，或在环境变量中配置 GEMINI_API_KEY。'
+          error: '请在设置中填入 Google Gemini API Key，或在环境变量中配置 GEMINI_API_KEY。'
         });
       }
 
       const ai = new GoogleGenAI({ apiKey: activeKey });
-      const targetModel = model || 'gemini-3.8-flash';
+      const targetModel = model || 'gemini-2.0-flash';
 
-      // Format messages for Gemini
-      // Combine systemInstruction if provided
       const contents = (messages || []).map((msg: any) => ({
         role: msg.role === 'assistant' ? 'model' : 'user',
         parts: [{ text: msg.content || '' }]
@@ -152,7 +248,6 @@ app.post('/api/chat', async (req: Request, res: Response) => {
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
 
-        // Proxy stream
         const reader = upstreamRes.body.getReader();
         const decoder = new TextDecoder();
 
@@ -234,9 +329,8 @@ app.post('/api/chat', async (req: Request, res: Response) => {
       // not JSON
     }
 
-    // Friendly explanation for quota / rate limit exhaustion
     if (errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('Quota exceeded') || errMsg.includes('quota')) {
-      errMsg = `API 请求额度/速率受限 (429 Rate Limit / Quota Exceeded)。\n• 原因：当前模型请求频率过快或免费额度已达限额。\n• 刷新机制：Gemini/OpenAI 速率限制通常在每分钟或整点刷新，每日配额于 UTC 00:00 刷新。\n• 解决方案：请稍候重试，或在左上角设置中配置个人 API 密钥/自定义中转接口。`;
+      errMsg = `API 请求频度/配额报错 (429 Rate Limit / Quota Exceeded)。\n• 原因：当前模型请求频率过快或按量费额度已达上限。\n• 刷新机制：Gemini/OpenAI 配额限制通常在每分钟或整点刷新，按日额度于 UTC 00:00 刷新。\n• 解决方案：请稍后重试，或在左上角设置中配置个人 API 密钥/自定义中转接口。`;
     }
 
     return res.status(500).json({
@@ -302,14 +396,14 @@ app.get('/api/check-quota', async (req: Request, res: Response) => {
     if (!key) {
       return res.json({
         available: false,
-        message: '未配置任何 API Key，可使用本地免后台模式或在设置中输入 Key。',
+        message: '未配置任何 API Key，可使用本地回退模式或在设置中输入 Key。',
         refreshed: false,
       });
     }
 
     const ai = new GoogleGenAI({ apiKey: key });
     const pingRes = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
+      model: 'gemini-2.0-flash',
       contents: [{ role: 'user', parts: [{ text: 'ping' }] }],
       config: { maxOutputTokens: 5, temperature: 0.1 },
     });
@@ -317,7 +411,7 @@ app.get('/api/check-quota', async (req: Request, res: Response) => {
     return res.json({
       available: true,
       refreshed: true,
-      message: 'API 服务响应正常，额度充沛可用！',
+      message: 'API 服务响应正常，额度尚未可用！',
       preview: pingRes.text?.trim() || 'pong',
       timestamp: Date.now(),
     });
@@ -329,7 +423,7 @@ app.get('/api/check-quota', async (req: Request, res: Response) => {
       refreshed: !isExhausted,
       isExhausted,
       message: isExhausted
-        ? '当前模型额度已达限额，通常每分钟或次日 UTC 0 点自动刷新。'
+        ? '当前模型额度已达上限，通常每分钟次或次日 UTC 0 点自动刷新。'
         : `服务返回: ${msg.slice(0, 100)}`,
       timestamp: Date.now(),
     });
