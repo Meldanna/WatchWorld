@@ -1,0 +1,93 @@
+/**
+ * 观界 Design System - 设计令牌
+ * 基于昼夜双模态的层级化设计系统
+ */
+
+:root {
+  /* === 表面层级 === */
+  /* Light Mode: 从纯白到浅灰的五层表面 */
+  --surface-0: #FFFFFF;
+  --surface-1: #F8FAFB;
+  --surface-2: #F1F5F8;
+  --surface-3: #E8EEF3;
+  --surface-elevated: #FFFFFF;
+
+  /* Dark Mode: 从深黑到浅灰的五层表面 */
+  &.dark {
+    --surface-0: #0A0D12;
+    --surface-1: #0F131C;
+    --surface-2: #161D2B;
+    --surface-3: #1E2636;
+    --surface-elevated: #1E2636;
+  }
+
+  /* === 文本颜色 === */
+  --text-primary: #0F172A;
+  --text-secondary: #475569;
+  --text-tertiary: #94A3B8;
+  --text-inverse: #FFFFFF;
+
+  &.dark {
+    --text-primary: #F1F5F9;
+    --text-secondary: #CBD5E1;
+    --text-tertiary: #64748B;
+    --text-inverse: #0F172A;
+  }
+
+  /* === 主题色：青蓝 Cyan + 靛青 Indigo（时间线推演主题）=== */
+  --accent-primary: #38BDF8;
+  --accent-primary-hover: #0EA5E9;
+  --accent-secondary: #6366F1;
+  --accent-secondary-hover: #4F46E5;
+
+  /* === 边框 === */
+  --border-default: #E2E8F0;
+  --border-subtle: #F1F5F9;
+
+  &.dark {
+    --border-default: #2D3748;
+    --border-subtle: #1E2636;
+  }
+
+  /* === 圆角令牌 === */
+  --radius-sm: 0.5rem;    /* 8px */
+  --radius-md: 0.75rem;   /* 12px */
+  --radius-lg: 1rem;      /* 16px */
+  --radius-xl: 1.5rem;    /* 24px */
+  --radius-pill: 999px;   /* 胶囊形 */
+  --radius-circle: 50%;   /* 圆形 */
+
+  /* === 间距令牌 === */
+  --space-xs: 0.5rem;   /* 8px */
+  --space-sm: 0.75rem;  /* 12px */
+  --space-md: 1rem;     /* 16px */
+  --space-lg: 1.5rem;   /* 24px */
+  --space-xl: 2rem;     /* 32px */
+  --space-2xl: 3rem;    /* 48px */
+
+  /* === 阴影令牌 === */
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1);
+  --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1);
+
+  /* === 字体家族 === */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  /* === 流式排版 === */
+  --text-xs: clamp(0.625rem, 0.6rem + 0.125vw, 0.75rem);    /* 10-12px */
+  --text-sm: clamp(0.75rem, 0.7rem + 0.25vw, 0.875rem);     /* 12-14px */
+  --text-base: clamp(0.875rem, 0.825rem + 0.25vw, 1rem);    /* 14-16px */
+  --text-lg: clamp(1rem, 0.95rem + 0.25vw, 1.125rem);       /* 16-18px */
+  --text-xl: clamp(1.125rem, 1.05rem + 0.375vw, 1.25rem);   /* 18-20px */
+  --text-2xl: clamp(1.5rem, 1.4rem + 0.5vw, 1.875rem);      /* 24-30px */
+
+  /* === Z-index 层级 === */
+  --z-base: 0;
+  --z-dropdown: 1000;
+  --z-sticky: 1020;
+  --z-modal-backdrop: 1030;
+  --z-modal: 1040;
+  --z-toast: 1050;
+}

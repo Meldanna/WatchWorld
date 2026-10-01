@@ -1306,36 +1306,17 @@ export default function App() {
 
   return (
     <div className={`flex flex-col h-screen w-full bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 overflow-hidden select-none font-sans transition-colors`}>
-      {/* Mobile Header */}
+      {/* Header - Simplified */}
       <Header
         currentSession={activeSession}
-        currentGroup={activeGroup}
-        currentAgent={activeAgent}
-        activeProvider={activeProvider}
         theme={theme}
         uiMode={uiMode}
         onToggleUiMode={handleToggleUiMode}
         onOpenSidebar={() => setIsSidebarOpen(true)}
-        onNewSession={() => handleNewSession()}
-        onOpenSettings={() => setIsProviderModalOpen(true)}
-        onOpenDisplaySettingsModal={() => setIsDisplaySettingsModalOpen(true)}
+        onOpenSettings={() => setIsDisplaySettingsModalOpen(true)}
         onOpenTimelineModal={() => setIsTimelineModalOpen(true)}
-        onOpenAgentModal={() => setIsAgentModalOpen(true)}
-        onOpenVisibilityModal={() => setIsVisibilityModalOpen(true)}
-        onOpenKnowledgeModal={() => setIsKnowledgeModalOpen(true)}
-        onOpenRegexModal={() => setIsRegexModalOpen(true)}
-        onOpenThemeModal={() => setIsThemeModalOpen(true)}
-        onOpenMcpModal={() => setIsMcpModalOpen(true)}
-        onOpenSkillModal={() => setIsSkillModalOpen(true)}
-        onOpenSearchModal={() => setIsSearchModalOpen(true)}
         onOpenDocumentModal={() => setIsDocumentModalOpen(true)}
-        onOpenDualBoxPromptModal={() => setIsDualBoxPromptModalOpen(true)}
         onTriggerRoleAnalysis={handleTriggerRoleAnalysis}
-        onRenameSession={handleRenameSession}
-        onClearSession={handleClearSession}
-        onDeleteSession={handleDeleteSession}
-        onMoveSessionGroup={handleMoveSessionGroup}
-        groups={groups}
       />
 
       {/* Main Conversation Window */}

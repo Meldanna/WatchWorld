@@ -121,20 +121,21 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = ({
     <div
       ref={containerRef}
       onScroll={handleScroll}
-      className="flex-1 w-full overflow-y-auto px-1 sm:px-4 py-4 space-y-1 relative"
+      className="flex-1 w-full overflow-y-auto px-2 sm:px-6 py-6 space-y-3 relative"
+      style={{ backgroundColor: 'var(--surface-1)' }}
     >
       {/* Top Banner: UI Render Limit info */}
       {isLimited && (
-        <div className="mx-auto max-w-md my-2 px-3 py-1.5 bg-slate-100/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-700/80 rounded-xl shadow-md backdrop-blur-md flex items-center justify-between text-xs text-slate-700 dark:text-slate-300">
-          <div className="flex items-center gap-1.5">
-            <Layers size={13} className={theme.primaryText} />
-            <span>
-              已启用高性能渲染：仅显示最新 <strong className={theme.primaryText}>{uiRenderLimit}</strong> 条（还有 {hiddenPastCount} 条已暂隐）
+        <div className="mx-auto max-w-2xl my-3 px-4 py-2.5 bg-white/90 dark:bg-[var(--surface-elevated)]/90 border border-[var(--border-default)] rounded-2xl shadow-sm backdrop-blur-xl flex items-center justify-between text-sm">
+          <div className="flex items-center gap-2">
+            <Layers size={16} className="text-[var(--accent-primary)]" />
+            <span className="text-[var(--text-secondary)]">
+              已启用高性能渲染：仅显示最新 <strong className="text-[var(--text-primary)]">{uiRenderLimit}</strong> 条（还有 {hiddenPastCount} 条已暂隐）
             </span>
           </div>
           <button
             onClick={() => setShowAllTemporarily(true)}
-            className={`text-[11px] px-2 py-0.5 rounded bg-white dark:bg-slate-800 shadow-sm border border-slate-200 dark:border-slate-700 hover:text-black dark:hover:text-white font-medium ${theme.primaryText}`}
+            className="text-xs px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800/60 hover:bg-slate-200 dark:hover:bg-slate-700/80 text-[var(--accent-primary)] font-semibold transition-all"
           >
             显示全部
           </button>
@@ -142,11 +143,11 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = ({
       )}
 
       {showAllTemporarily && uiRenderLimit > 0 && (
-        <div className="mx-auto max-w-md my-2 px-3 py-1.5 bg-slate-100/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-700/80 rounded-xl shadow-sm backdrop-blur-md flex items-center justify-between text-xs text-slate-700 dark:text-slate-300">
-          <span>已临时展开全部 {totalMessageCount} 条消息</span>
+        <div className="mx-auto max-w-2xl my-3 px-4 py-2.5 bg-white/90 dark:bg-[var(--surface-elevated)]/90 border border-[var(--border-default)] rounded-2xl shadow-sm backdrop-blur-xl flex items-center justify-between text-sm">
+          <span className="text-[var(--text-secondary)]">已临时展开全部 {totalMessageCount} 条消息</span>
           <button
             onClick={() => setShowAllTemporarily(false)}
-            className="text-[11px] px-2 py-0.5 rounded bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300"
+            className="text-xs px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800/60 hover:bg-slate-200 dark:hover:bg-slate-700/80 text-[var(--text-secondary)] transition-all"
           >
             恢复折叠
           </button>
