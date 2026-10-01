@@ -11,6 +11,8 @@ import {
   McpServerConfig,
   AgentSkill,
   MessageDisplaySettings,
+  WebDavConfig,
+  WorldDocument,
 } from '../types';
 import {
   DEFAULT_PROVIDERS,
@@ -23,6 +25,8 @@ import {
   DEFAULT_SKILLS,
   INITIAL_SESSION,
   DEFAULT_DISPLAY_SETTINGS,
+  DEFAULT_WEBDAV_CONFIG,
+  DEFAULT_WORLD_DOCUMENTS,
 } from './defaultData';
 
 const STORAGE_KEYS = {
@@ -40,6 +44,9 @@ const STORAGE_KEYS = {
   MCP_SERVERS: 'omnichat_mcp_servers',
   SKILLS: 'omnichat_skills',
   DISPLAY_SETTINGS: 'omnichat_display_settings',
+  WEBDAV_CONFIG: 'guanjie_webdav_config',
+  WORLD_DOCUMENTS: 'guanjie_world_documents',
+  INPUT_DRAFT_PREFIX: 'guanjie_draft_',
 };
 
 function safeGet<T>(key: string, fallback: T): T {
@@ -48,7 +55,7 @@ function safeGet<T>(key: string, fallback: T): T {
     if (!raw) return fallback;
     return JSON.parse(raw);
   } catch (err) {
-    console.warn(`Error loading ${key} from localStorage:`, err);
+    console.error(`Error loading key "${key}":`, err);
     return fallback;
   }
 }
@@ -57,20 +64,13 @@ function safeSet<T>(key: string, value: T): void {
   try {
     localStorage.setItem(key, JSON.stringify(value));
   } catch (err) {
-    console.warn(`Error writing ${key} to localStorage:`, err);
+    console.error(`Error saving key "${key}":`, err);
   }
 }
 
 export const Storage = {
   getProviders(): ApiProviderConfig[] {
-    const list = safeGet<ApiProviderConfig[]>(STORAGE_KEYS.PROVIDERS, DEFAULT_PROVIDERS);
-    const map = new Map(list.map((p) => [p.id, p]));
-    for (const def of DEFAULT_PROVIDERS) {
-      if (!map.has(def.id)) {
-        list.push(def);
-      }
-    }
-    return list;
+    return safeGet<ApiProviderConfig[]>(STORAGE_KEYS.PROVIDERS, DEFAULT_PROVIDERS);
   },
 
   setProviders(providers: ApiProviderConfig[]) {
@@ -86,9 +86,7 @@ export const Storage = {
   },
 
   getGroups(): ChatGroup[] {
-    const list = safeGet<ChatGroup[]>(STORAGE_KEYS.GROUPS, DEFAULT_GROUPS);
-    if (!list || list.length === 0) return DEFAULT_GROUPS;
-    return list;
+    return safeGet<ChatGroup[]>(STORAGE_KEYS.GROUPS, DEFAULT_GROUPS);
   },
 
   setGroups(groups: ChatGroup[]) {
@@ -96,14 +94,7 @@ export const Storage = {
   },
 
   getAgents(): Agent[] {
-    const list = safeGet<Agent[]>(STORAGE_KEYS.AGENTS, DEFAULT_AGENTS);
-    const map = new Map(list.map((a) => [a.id, a]));
-    for (const def of DEFAULT_AGENTS) {
-      if (!map.has(def.id)) {
-        list.push(def);
-      }
-    }
-    return list;
+    return safeGet<Agent[]>(STORAGE_KEYS.AGENTS, DEFAULT_AGENTS);
   },
 
   setAgents(agents: Agent[]) {
@@ -111,29 +102,24 @@ export const Storage = {
   },
 
   getPrompts(): PromptPreset[] {
-    const list = safeGet<PromptPreset[]>(STORAGE_KEYS.PROMPTS, DEFAULT_PROMPTS);
-    const map = new Map(list.map((p) => [p.id, p]));
-    for (const def of DEFAULT_PROMPTS) {
-      if (!map.has(def.id)) {
-        list.push(def);
-      }
-    }
-    return list;
+    return safeGet<PromptPreset[]>(STORAGE_KEYS.PROMPTS, DEFAULT_PROMPTS);
   },
 
   setPrompts(prompts: PromptPreset[]) {
     safeSet(STORAGE_KEYS.PROMPTS, prompts);
   },
 
+  getSessions(): ChatSession[] {
+    const list = safeGet<ChatSession[]>(STORAGE_KEYS.SESSIONS, [INITIAL_SESSION]);
+    return list.length > 0 ? list : [INITIAL_SESSION];
+  },
+
+  setSessions(sessions: ChatSession[]) {
+    safeSet(STORAGE_KEYS.SESSIONS, sessions);
+  },
+
   getRegexRules(): RegexRule[] {
-    const list = safeGet<RegexRule[]>(STORAGE_KEYS.REGEX_RULES, DEFAULT_REGEX_RULES);
-    const map = new Map(list.map((r) => [r.id, r]));
-    for (const def of DEFAULT_REGEX_RULES) {
-      if (!map.has(def.id)) {
-        list.push(def);
-      }
-    }
-    return list;
+    return safeGet<RegexRule[]>(STORAGE_KEYS.REGEX_RULES, DEFAULT_REGEX_RULES);
   },
 
   setRegexRules(rules: RegexRule[]) {
@@ -141,14 +127,10 @@ export const Storage = {
   },
 
   getKnowledgeBase(): KnowledgeItem[] {
-    const list = safeGet<KnowledgeItem[]>(STORAGE_KEYS.KNOWLEDGE_BASE, DEFAULT_KNOWLEDGE_BASE);
-    const map = new Map(list.map((k) => [k.id, k]));
-    for (const def of DEFAULT_KNOWLEDGE_BASE) {
-      if (!map.has(def.id)) {
-        list.push(def);
-      }
-    }
-    return list;
+    return safeGet<KnowledgeItem[]>(
+      STORAGE_KEYS.KNOWLEDGE_BASE,
+      DEFAULT_KNOWLEDGE_BASE
+    );
   },
 
   setKnowledgeBase(items: KnowledgeItem[]) {
@@ -159,12 +141,12 @@ export const Storage = {
     return safeGet<ThemePalette>(STORAGE_KEYS.THEME_PALETTE, 'emerald');
   },
 
-  setThemePalette(theme: ThemePalette) {
-    safeSet(STORAGE_KEYS.THEME_PALETTE, theme);
+  setThemePalette(palette: ThemePalette) {
+    safeSet(STORAGE_KEYS.THEME_PALETTE, palette);
   },
 
   getUiMode(): UiMode {
-    return safeGet<UiMode>(STORAGE_KEYS.UI_MODE, 'light');
+    return safeGet<UiMode>(STORAGE_KEYS.UI_MODE, 'dark');
   },
 
   setUiMode(mode: UiMode) {
@@ -172,14 +154,10 @@ export const Storage = {
   },
 
   getMcpServers(): McpServerConfig[] {
-    const list = safeGet<McpServerConfig[]>(STORAGE_KEYS.MCP_SERVERS, DEFAULT_MCP_SERVERS);
-    const map = new Map(list.map((m) => [m.id, m]));
-    for (const def of DEFAULT_MCP_SERVERS) {
-      if (!map.has(def.id)) {
-        list.push(def);
-      }
-    }
-    return list;
+    return safeGet<McpServerConfig[]>(
+      STORAGE_KEYS.MCP_SERVERS,
+      DEFAULT_MCP_SERVERS
+    );
   },
 
   setMcpServers(servers: McpServerConfig[]) {
@@ -187,34 +165,11 @@ export const Storage = {
   },
 
   getSkills(): AgentSkill[] {
-    const list = safeGet<AgentSkill[]>(STORAGE_KEYS.SKILLS, DEFAULT_SKILLS);
-    const map = new Map(list.map((s) => [s.id, s]));
-    for (const def of DEFAULT_SKILLS) {
-      if (!map.has(def.id)) {
-        list.push(def);
-      }
-    }
-    return list;
+    return safeGet<AgentSkill[]>(STORAGE_KEYS.SKILLS, DEFAULT_SKILLS);
   },
 
   setSkills(skills: AgentSkill[]) {
     safeSet(STORAGE_KEYS.SKILLS, skills);
-  },
-
-  getSessions(): ChatSession[] {
-    const list = safeGet<ChatSession[]>(STORAGE_KEYS.SESSIONS, [INITIAL_SESSION]);
-    if (!list || list.length === 0) return [INITIAL_SESSION];
-    return list.map((s) => ({
-      ...s,
-      aiContextVisibility: s.aiContextVisibility || (s as any).aiVisibility || 'all',
-      uiRenderLimit: s.uiRenderLimit ?? 0,
-      connectedKnowledgeIds: s.connectedKnowledgeIds || ['kb-quick-notes'],
-      connectedSkillIds: s.connectedSkillIds || ['skill-web-research', 'skill-code-debugger'],
-    }));
-  },
-
-  setSessions(sessions: ChatSession[]) {
-    safeSet(STORAGE_KEYS.SESSIONS, sessions);
   },
 
   getDisplaySettings(): MessageDisplaySettings {
@@ -240,10 +195,51 @@ export const Storage = {
     safeSet(STORAGE_KEYS.ACTIVE_SESSION_ID, id);
   },
 
+  getWebDavConfig(): WebDavConfig {
+    return safeGet<WebDavConfig>(STORAGE_KEYS.WEBDAV_CONFIG, DEFAULT_WEBDAV_CONFIG);
+  },
+
+  setWebDavConfig(config: WebDavConfig) {
+    safeSet(STORAGE_KEYS.WEBDAV_CONFIG, config);
+  },
+
+  getWorldDocuments(): WorldDocument[] {
+    return safeGet<WorldDocument[]>(
+      STORAGE_KEYS.WORLD_DOCUMENTS,
+      DEFAULT_WORLD_DOCUMENTS
+    );
+  },
+
+  setWorldDocuments(docs: WorldDocument[]) {
+    safeSet(STORAGE_KEYS.WORLD_DOCUMENTS, docs);
+  },
+
+  getInputDraft(sessionId: string): string {
+    if (!sessionId) return '';
+    try {
+      return localStorage.getItem(`${STORAGE_KEYS.INPUT_DRAFT_PREFIX}${sessionId}`) || '';
+    } catch {
+      return '';
+    }
+  },
+
+  setInputDraft(sessionId: string, text: string) {
+    if (!sessionId) return;
+    try {
+      if (text) {
+        localStorage.setItem(`${STORAGE_KEYS.INPUT_DRAFT_PREFIX}${sessionId}`, text);
+      } else {
+        localStorage.removeItem(`${STORAGE_KEYS.INPUT_DRAFT_PREFIX}${sessionId}`);
+      }
+    } catch {
+      // ignore
+    }
+  },
+
   exportAllData(): string {
     const dump = {
-      version: 4,
-      timestamp: Date.now(),
+      version: 5,
+      exportTime: Date.now(),
       providers: this.getProviders(),
       groups: this.getGroups(),
       agents: this.getAgents(),
@@ -255,6 +251,8 @@ export const Storage = {
       mcpServers: this.getMcpServers(),
       skills: this.getSkills(),
       displaySettings: this.getDisplaySettings(),
+      webdavConfig: this.getWebDavConfig(),
+      worldDocuments: this.getWorldDocuments(),
       sessions: this.getSessions(),
     };
     return JSON.stringify(dump, null, 2);
@@ -274,6 +272,8 @@ export const Storage = {
       if (data.mcpServers) this.setMcpServers(data.mcpServers);
       if (data.skills) this.setSkills(data.skills);
       if (data.displaySettings) this.setDisplaySettings(data.displaySettings);
+      if (data.webdavConfig) this.setWebDavConfig(data.webdavConfig);
+      if (data.worldDocuments) this.setWorldDocuments(data.worldDocuments);
       if (data.sessions) this.setSessions(data.sessions);
       return true;
     } catch (e) {

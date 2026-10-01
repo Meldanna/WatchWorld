@@ -1,4 +1,4 @@
-import { TimelineBranch, ChatMessage } from '../types';
+import { TimelineBranch, ChatMessage, ChatSession } from '../types';
 
 export const TIMELINE_COLORS = [
   {
@@ -76,16 +76,177 @@ export const DEFAULT_MAIN_TIMELINE_ID = 'timeline-main';
 export function createDefaultMainTimeline(): TimelineBranch {
   return {
     id: DEFAULT_MAIN_TIMELINE_ID,
-    name: '现实主线',
-    tag: '主线',
+    name: '通用世界观',
+    tag: '通用',
+    codeTag: '通用',
+    descriptionTag: '通用世界观',
+    visible: true,
     color: 'indigo',
-    description: '核心主世界设定与初始剧情推进现实。',
-    plotSummary: '故事与对话从本主分支起始推进。',
-    keyMilestones: ['会话起源与主线建立'],
+    description: '核心共享世界观与通用事实设定。所有分支均继承此通用基础。',
+    plotSummary: '世界观基石由此展开，通用信息在所有分支共享。',
+    keyMilestones: ['世界观核心基石建立'],
     messageIds: [],
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
+}
+
+/**
+ * 4.3 编号标签分配算法
+ * 自动分配类似 A1、A12、B1、B2 的编号标签，确保不重复且具备层级关系
+ */
+export function allocateTimelineCodeTag(
+  existingTimelines: TimelineBranch[],
+  parentBranch?: TimelineBranch
+): string {
+  const existingCodes = new Set(
+    existingTimelines.map((t) => t.codeTag).filter(Boolean) as string[]
+  );
+
+  if (!parentBranch || parentBranch.id === DEFAULT_MAIN_TIMELINE_ID || parentBranch.codeTag === '通用') {
+    // 根分支：分配 A1, B1, C1...
+    const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    for (let i = 0; i < letters.length; i++) {
+      const letter = letters[i];
+      let num = 1;
+      while (existingCodes.has(`${letter}${num}`)) {
+        num++;
+      }
+      return `${letter}${num}`;
+    }
+    return `T${existingTimelines.length}`;
+  }
+
+  // 子分支：基于父分支分配（例如 A1 -> A11, A12, A13...）
+  const parentCode = parentBranch.codeTag || 'A1';
+  let subIndex = 1;
+  while (existingCodes.has(`${parentCode}${subIndex}`)) {
+    subIndex++;
+  }
+  return `${parentCode}${subIndex}`;
+}
+
+/**
+ * 五、消息重排中间件（纯程序逻辑，不调用AI，不消耗 Token）
+ *
+ * function 重排(当前分支, 所有消息) {
+ *   1. 读取用户当前所在分支编号
+ *   2. 从该分支向上回溯标签树，收集整条链路：A12 → A1 → 通用
+ *   3. 检查链路上每个分支的可见性，跳过隐藏的
+ *   4. 取出可见分支的所有消息
+ *   5. 按标签树层级排列：通用 → 父分支 → 子分支
+ *   6. 同层级内按楼号升序
+ *   7. 当前分支的消息放在最末尾
+ *   8. 输出重排后的消息序列发送给AI
+ * }
+ */
+export function rearrangeMessagesForAi(
+  currentBranch: TimelineBranch | undefined,
+  allTimelines: TimelineBranch[],
+  allMessages: ChatMessage[]
+): ChatMessage[] {
+  if (!allMessages || allMessages.length === 0) return [];
+  if (!currentBranch) return [...allMessages];
+
+  // 1. 回溯收集链路：从当前分支向上查找 parentId 直到通用根节点
+  const chain: TimelineBranch[] = [];
+  const visited = new Set<string>();
+  let cur: TimelineBranch | undefined = currentBranch;
+
+  while (cur && !visited.has(cur.id)) {
+    visited.add(cur.id);
+    chain.unshift(cur); // 将父级放在前面：[根, 父, 当前]
+    if (cur.parentId && cur.parentId !== cur.id) {
+      cur = allTimelines.find((t) => t.id === cur!.parentId);
+    } else {
+      break;
+    }
+  }
+
+  // 如果链条中没有通用根主线，确保通用主线在最前
+  const mainBranch = allTimelines.find((t) => t.id === DEFAULT_MAIN_TIMELINE_ID || t.codeTag === '通用');
+  if (mainBranch && !visited.has(mainBranch.id)) {
+    chain.unshift(mainBranch);
+  }
+
+  // 2. 检查链路上每个分支的可见性，跳过隐藏的分支（visible === false）
+  const visibleChain = chain.filter((b) => b.visible !== false);
+  const visibleBranchIds = new Set(visibleChain.map((b) => b.id));
+  const branchHierarchyOrder = new Map<string, number>();
+  visibleChain.forEach((b, index) => {
+    branchHierarchyOrder.set(b.id, index);
+  });
+
+  // 3. 取出属于可见分支或通用的消息
+  const includedMessages = allMessages.filter((m) => {
+    // 通用消息默认所有分支共享
+    if (m.isCommon || m.codeTag === '通用' || m.timelineId === DEFAULT_MAIN_TIMELINE_ID) {
+      return true;
+    }
+    if (!m.timelineId) return true; // 未分配分支的旧消息视为通用
+    return visibleBranchIds.has(m.timelineId);
+  });
+
+  // 4. 排序：通用 -> 父分支 -> 子分支 -> 当前分支（同层级内按 floorNumber 递增升序）
+  const currentBranchId = currentBranch.id;
+
+  const sortedMessages = [...includedMessages].sort((a, b) => {
+    const isCurrentA = a.timelineId === currentBranchId;
+    const isCurrentB = b.timelineId === currentBranchId;
+
+    // 当前分支的消息排在最末尾 (PRD 5.3 规则7)
+    if (isCurrentA && !isCurrentB) return 1;
+    if (!isCurrentA && isCurrentB) return -1;
+
+    // 按链路层级排列
+    const orderA = branchHierarchyOrder.get(a.timelineId || '') ?? 0;
+    const orderB = branchHierarchyOrder.get(b.timelineId || '') ?? 0;
+
+    if (orderA !== orderB) {
+      return orderA - orderB;
+    }
+
+    // 同层级内按楼号升序 (PRD 5.3 规则6)
+    const floorA = a.floorNumber ?? 0;
+    const floorB = b.floorNumber ?? 0;
+    if (floorA !== floorB) {
+      return floorA - floorB;
+    }
+
+    return (a.timestamp || 0) - (b.timestamp || 0);
+  });
+
+  return sortedMessages;
+}
+
+/**
+ * 格式化发给 AI 的消息上下文，带有楼号与双标签 (PRD 5.4)
+ * 示例：[A1·下药线] #4 决定下药
+ */
+export function formatMessageWithFloorAndTag(
+  message: ChatMessage,
+  allTimelines: TimelineBranch[]
+): string {
+  const content =
+    message.role === 'assistant'
+      ? (message.versions[message.currentVersionIndex] || message.versions[0])?.content || message.content
+      : message.content;
+
+  const floorPrefix = message.floorNumber ? `#${message.floorNumber}` : '';
+  const timeline = allTimelines.find((t) => t.id === message.timelineId);
+
+  let tagDisplay = '通用';
+  if (message.codeTag) {
+    tagDisplay = message.descriptionTag
+      ? `${message.codeTag}·${message.descriptionTag}`
+      : message.codeTag;
+  } else if (timeline) {
+    const code = timeline.codeTag || timeline.tag || '通用';
+    const desc = timeline.descriptionTag || timeline.name || '';
+    tagDisplay = desc && desc !== code ? `${code}·${desc}` : code;
+  }
+
+  return `[${tagDisplay}] ${floorPrefix} ${content}`.trim();
 }
 
 export interface TimelineDetectionResult {
@@ -99,11 +260,6 @@ export interface TimelineDetectionResult {
 
 /**
  * 自动识别消息中对时间线的提及或显式声明
- * 规则涵盖：
- * 1. "这是一个时间线..." / "作为新时间线..."
- * 2. 【时间线：xxx】 / [时间线：xxx]
- * 3. "切换到时间线xxx" / "回到主线" / "在xxx时间线里"
- * 4. IF线 / 平行世界线声明
  */
 export function detectTimelineIntent(
   text: string,
@@ -112,9 +268,17 @@ export function detectTimelineIntent(
   const clean = text.trim();
   if (!clean) return { triggered: false };
 
-  // 1. 检查是否显式要求切换到已有的某个时间线 (例如: "回到主线", "切换到时间线A", "切到IF线")
+  // 1. 用户输入编号直接切换（例如输入 "A12"、"切到A1"、"进入B1"）
   for (const t of existingTimelines) {
-    const escapedTag = t.tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (t.codeTag && clean.toUpperCase() === t.codeTag.toUpperCase()) {
+      return {
+        triggered: true,
+        action: 'switch_existing',
+        targetTimelineId: t.id,
+      };
+    }
+
+    const escapedTag = (t.codeTag || t.tag).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const escapedName = t.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
     const switchPattern = new RegExp(
@@ -138,45 +302,24 @@ export function detectTimelineIntent(
 
   if (explicitMatch) {
     const remainder = explicitMatch[1]?.trim() || '';
-    const nameMatch = remainder.match(/^([^\n,，。！？!?;；]{2,20})/);
-    let extractedName = nameMatch ? nameMatch[1].trim() : '';
-
-    if (!extractedName) {
-      const count = existingTimelines.length;
-      const letters = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
-      const letter = letters[Math.min(count - 1, letters.length - 1)] || `${count}`;
-      extractedName = `分支时间线 ${letter}`;
-    }
-
-    // 尝试提取标签简写 (2-6个字符)
-    let tag = extractedName.replace(/^时间线[:：\s]*/, '').slice(0, 6).trim();
-    if (!tag) tag = `线${existingTimelines.length}`;
-
-    // 区分信息：取用户接下来的设定阐述
-    const description = remainder.length > 5 ? remainder : `由用户创建的「${extractedName}」时间线分支，设定有别于主线。`;
-
+    const nameMatch = remainder.match(/^(?:叫|名为|称作|：|:)?\s*([^\s,，。]+)/);
+    const branchName = nameMatch ? nameMatch[1] : remainder.slice(0, 15) || '新时间线';
     return {
       triggered: true,
       action: 'create_new',
-      newTimelineName: extractedName,
-      newTimelineTag: tag,
-      initialDescription: description,
+      newTimelineName: branchName,
+      newTimelineTag: branchName.slice(0, 4),
+      initialDescription: remainder || '根据用户意图开启的新世界观时间线。',
     };
   }
 
-  // 3. 检测方括号标签式时间线：【时间线：xxx】 / [时间线A：五年后]
-  const bracketMatch = clean.match(
-    /[【\[](?:时间线|分支线|IF线|平行线)[：:\s]*(.+?)[】\]]/i
-  );
+  // 3. 检测方括号标签声明：【时间线：xxx】
+  const bracketTagRegex = /[【\[](?:时间线|分支|IF线)[：:\s]*([^】\]]+)[】\]]/i;
+  const bracketMatch = clean.match(bracketTagRegex);
   if (bracketMatch) {
-    const rawContent = bracketMatch[1].trim();
-    const parts = rawContent.split(/[：:]/);
-    const extractedName = rawContent;
-    const tag = (parts[0] || rawContent).slice(0, 6).trim();
-
-    // 检查是否已存在同名或同tag的时间线
+    const rawName = bracketMatch[1].trim();
     const existing = existingTimelines.find(
-      (t) => t.name === extractedName || t.tag === tag
+      (t) => t.name === rawName || t.tag === rawName || t.codeTag === rawName
     );
     if (existing) {
       return {
@@ -184,125 +327,60 @@ export function detectTimelineIntent(
         action: 'switch_existing',
         targetTimelineId: existing.id,
       };
-    }
-
-    return {
-      triggered: true,
-      action: 'create_new',
-      newTimelineName: extractedName,
-      newTimelineTag: tag,
-      initialDescription: clean.slice(0, 200),
-    };
-  }
-
-  // 4. 检测常见前缀式："时间线[A-Z0-9]：" / "IF线：" / "平行时间线："
-  const prefixMatch = clean.match(
-    /^(?:时间线\s*([A-Za-z0-9一二三四五六七八九十]+)|IF线|平行(?:时间线|世界))[：:\s]+(.+)/i
-  );
-  if (prefixMatch) {
-    const tagSuffix = prefixMatch[1] || 'IF';
-    const tag = `时间线${tagSuffix}`.slice(0, 6);
-    const content = prefixMatch[2]?.trim() || '';
-    const name = `时间线 ${tagSuffix}：${content.slice(0, 15)}`;
-
-    const existing = existingTimelines.find((t) => t.tag === tag);
-    if (existing) {
+    } else {
       return {
         triggered: true,
-        action: 'switch_existing',
-        targetTimelineId: existing.id,
+        action: 'create_new',
+        newTimelineName: rawName,
+        newTimelineTag: rawName.slice(0, 4),
+        initialDescription: `通过标签【${rawName}】明确创建的新时间线。`,
       };
     }
-
-    return {
-      triggered: true,
-      action: 'create_new',
-      newTimelineName: name,
-      newTimelineTag: tag,
-      initialDescription: content || `在时间线 ${tagSuffix} 下的展开情节。`,
-    };
   }
 
   return { triggered: false };
 }
 
 /**
- * 随着时间线剧情的发展，自动为该时间线提炼并写入更多区分信息与剧情脉络
- * 确保分类正确、记忆树持续进化
+ * 伴随对话自然推进，丰富时间线的区分描述与关键里程碑
  */
 export function enrichTimelineProgression(
-  timeline: TimelineBranch,
-  userText: string,
-  assistantReply: string
+  branch: TimelineBranch,
+  userMessage: string,
+  aiReply: string
 ): {
   updatedDescription: string;
   updatedPlotSummary: string;
   newMilestones: string[];
 } {
-  const currentDesc = timeline.description || '';
-  const currentSummary = timeline.plotSummary || '';
-  const milestones = [...(timeline.keyMilestones || [])];
+  const currentDesc = branch.description || '';
+  const currentPlot = branch.plotSummary || '';
+  const milestones = [...(branch.keyMilestones || [])];
 
-  // 1. 提炼核心关键情节 (从AI回复中截取有效段落与事件动向)
-  const cleanReply = assistantReply.replace(/```[\s\S]*?```/g, '').trim();
-  const replyLines = cleanReply
-    .split(/[\n。！？]/)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 8 && !s.startsWith('#'));
-
-  const keySentence = replyLines.slice(0, 2).join('；');
-
-  // 2. 检查是否有关键转折词汇或实体动向
-  const turningKeywords = [
-    '决定',
-    '发现',
-    '到达',
-    '获得',
-    '离开',
-    '击败',
-    '死亡',
-    '相遇',
-    '结盟',
-    '觉醒',
-    '穿越',
-    '战争',
-    '反转',
-    '揭开',
-  ];
-  const hasTurningPoint = turningKeywords.some(
-    (kw) => userText.includes(kw) || cleanReply.includes(kw)
-  );
-
-  let newMilestone: string | null = null;
-  if (hasTurningPoint && keySentence) {
-    newMilestone = `【进展】${keySentence.slice(0, 35)}...`;
-    if (!milestones.includes(newMilestone)) {
-      milestones.push(newMilestone);
+  const milestoneKeywords = ['决定', '导致', '发现', '改变', '爆发', '杀死', '揭开', '建立'];
+  for (const kw of milestoneKeywords) {
+    if (userMessage.includes(kw) || aiReply.includes(kw)) {
+      const sentence = (userMessage.length < 50 ? userMessage : aiReply)
+        .split(/[。！？\n]/)
+        .find((s) => s.includes(kw));
+      if (sentence && sentence.trim().length > 4) {
+        const cleanSnippet = sentence.trim().slice(0, 36);
+        if (!milestones.includes(cleanSnippet)) {
+          milestones.push(cleanSnippet);
+          break;
+        }
+      }
     }
   }
 
-  // 3. 增强区分信息 (写入当前环境状态、重要分支因果差异，避免被后续会话混淆)
-  const timeStampStr = new Date().toLocaleTimeString('zh-CN', {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-
-  // 提炼用户本轮输入的核心关切
-  const userCore = userText.slice(0, 60).replace(/\n/g, ' ');
-  const newPlotSnippet = `[${timeStampStr}] 交互焦点：“${userCore}” → 走向：${keySentence ? keySentence.slice(0, 45) : '剧情继续推进'}。`;
-
-  // 保持 plotSummary 条理清晰，最多保留最近 8 条脉络
-  const previousSnippets = currentSummary
-    .split('\n')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  previousSnippets.push(newPlotSnippet);
+  const previousSnippets = currentPlot ? currentPlot.split('\n') : [];
+  const latestExchangeSummary = `用户: ${userMessage.slice(0, 30)}... | 回复: ${aiReply.slice(0, 35)}...`;
+  previousSnippets.push(latestExchangeSummary);
   const updatedPlotSummary = previousSnippets.slice(-8).join('\n');
 
-  // 更新区分信息：如果发现新的特征，保留区分设定的持续演进
   let updatedDescription = currentDesc;
-  if (milestones.length > 0 && !currentDesc.includes('最新分歧')) {
-    updatedDescription = `${currentDesc}\n• 分歧特征沉淀：本分支已发展出独立的因果节点（当前共 ${milestones.length} 个关键里程碑）。`;
+  if (milestones.length > 0 && !currentDesc.includes('关键里程碑')) {
+    updatedDescription = `${currentDesc}\n• 本分支因果节点（当前共 ${milestones.length} 个关键里程碑）。`;
   }
 
   return {
@@ -313,74 +391,44 @@ export function enrichTimelineProgression(
 }
 
 /**
- * 根据后台建立的消息树，定位并重组属于当前时间线分支的上下文脉络
- * "就好像在后台建立了一个消息树，把它们重新定位排列"
+ * 构建发给 AI 的时间线系统背景树提示
  */
 export function buildTimelineTreePromptContext(
   activeTimeline: TimelineBranch,
   allTimelines: TimelineBranch[],
   allMessages: ChatMessage[]
 ): string {
-  // 查找父级时间线
   const parentTimeline = activeTimeline.parentId
     ? allTimelines.find((t) => t.id === activeTimeline.parentId)
     : null;
 
-  // 列出其他平行时间线供模型辨析区分
-  const otherTimelines = allTimelines.filter((t) => t.id !== activeTimeline.id);
+  const otherTimelines = allTimelines.filter((t) => t.id !== activeTimeline.id && t.visible !== false);
   const otherSection =
     otherTimelines.length > 0
       ? otherTimelines
           .map(
             (t) =>
-              `- 分支【${t.name}】(标签: ${t.tag}): ${t.description.slice(0, 60)}`
+              `- 分支【${t.codeTag || t.tag}·${t.descriptionTag || t.name}】: ${t.description.slice(0, 60)}`
           )
           .join('\n')
-      : '暂无其他平行分支。';
-
-  // 提取属于本分支以及父分支继承来的消息节点
-  const activeMessageIds = new Set(activeTimeline.messageIds);
-  const branchMessages = allMessages.filter(
-    (m) =>
-      m.timelineId === activeTimeline.id ||
-      activeMessageIds.has(m.id) ||
-      (m.role === 'user' && !m.timelineId)
-  );
-
-  const recentBranchExchanges = branchMessages.slice(-6).map((m) => {
-    const roleName = m.role === 'user' ? '用户' : 'AI';
-    const tagInfo = m.timelineTag ? `[${m.timelineTag}] ` : '';
-    const content =
-      m.role === 'assistant'
-        ? (m.versions[m.currentVersionIndex] || m.versions[0])?.content || m.content
-        : m.content;
-    return `${tagInfo}${roleName}: ${content.slice(0, 100)}`;
-  });
+      : '暂无其他可见平行分支。';
 
   return `
 # 【时间线记忆树 · 分支重组上下文】
-后台记忆整理引擎已激活，消息已根据时间线树完成重新定位与归类：
-- 当前激活分支：【${activeTimeline.name}】（标识标签：${activeTimeline.tag}）
-- 节点层级：${parentTimeline ? `分化自父分支【${parentTimeline.name}】` : '根主线节点'}
+后台记忆整理中间件已自动重排：
+- 当前激活分支：【${activeTimeline.codeTag || activeTimeline.tag} · ${activeTimeline.descriptionTag || activeTimeline.name}】
+- 分支层级溯源：${parentTimeline ? `分化自父分支【${parentTimeline.codeTag || parentTimeline.tag}·${parentTimeline.descriptionTag || parentTimeline.name}】` : '根主线节点（通用）'}
 - 核心区分信息/世界观特征：
   ${activeTimeline.description}
-- 本时间线剧情脉络与事件沉淀：
-  ${activeTimeline.plotSummary || '本分支剧情初步展开中...'}
-${
-  activeTimeline.keyMilestones && activeTimeline.keyMilestones.length > 0
-    ? `- 关键里程碑：\n  ${activeTimeline.keyMilestones.join('\n  ')}`
-    : ''
-}
+- 本时间线因果剧情沉淀：
+  ${activeTimeline.plotSummary || '本分支剧情展开中...'}
 
-【其他平行时间线（用于对比辨析，请严格保持分立，勿混淆当前剧情事实）】：
+【其他可见平行时间线（用于对比辨析，保持分立，切勿混淆事实）】：
 ${otherSection}
 
-【本分支消息树因果脉络参考（最近节点）】：
-${recentBranchExchanges.length > 0 ? recentBranchExchanges.join('\n') : '分支初始节点'}
-
-【AI回复准则】：
-1. 确认已看见上述时间线树。请直接在【${activeTimeline.name}】的世界线与因果体系下回复；
-2. 尊重本分支的独立特征与剧情发展，绝不与其他平行时间线的状态产生混淆；
-3. 随剧情自然发展，保持逻辑连贯与沉浸感。
+【AI回复规范 (PRD 六)】：
+1. 你的回复必须严格基于当前时间线【${activeTimeline.codeTag || activeTimeline.tag}】的因果发展；
+2. 若用户提出开启新分歧线，请在回复末尾主动提议新分支标签建议（如：新分支建议 [A12·下药线·感情上头]）；
+3. 若用户需要总结与正文分离，可用 <总结>概括</总结> 与 <正文>详情</正文> 标签包裹，配合正则系统精简历史 Token。
 `;
 }

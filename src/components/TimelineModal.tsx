@@ -12,6 +12,7 @@ import {
   BookOpen,
   Filter,
   Eye,
+  EyeOff,
   Layers,
 } from 'lucide-react';
 import { TimelineBranch, ChatSession } from '../types';
@@ -19,6 +20,7 @@ import { ThemeConfig } from '../lib/theme';
 import {
   TIMELINE_COLORS,
   getTimelineColorConfig,
+  allocateTimelineCodeTag,
 } from '../lib/timelineMemory';
 
 interface TimelineModalProps {
@@ -46,6 +48,8 @@ export const TimelineModal: React.FC<TimelineModalProps> = ({
   // Form states for creating / editing
   const [formName, setFormName] = useState('');
   const [formTag, setFormTag] = useState('');
+  const [formCodeTag, setFormCodeTag] = useState('');
+  const [formDescriptionTag, setFormDescriptionTag] = useState('');
   const [formColor, setFormColor] = useState('indigo');
   const [formParentId, setFormParentId] = useState<string>('');
   const [formDescription, setFormDescription] = useState('');
@@ -74,14 +78,30 @@ export const TimelineModal: React.FC<TimelineModalProps> = ({
     }));
   };
 
+  const handleToggleVisibility = (timelineId: string) => {
+    onUpdateSession((prev) => ({
+      ...prev,
+      timelines: (prev.timelines || []).map((t) =>
+        t.id === timelineId
+          ? { ...t, visible: t.visible === false ? true : false, updatedAt: Date.now() }
+          : t
+      ),
+      updatedAt: Date.now(),
+    }));
+  };
+
   const handleStartCreate = (parentId?: string) => {
+    const parent = parentId || activeTimelineId || '';
+    const autoCode = allocateTimelineCodeTag(parent, timelines);
     setEditingTimelineId(null);
-    setFormName('');
-    setFormTag('');
+    setFormCodeTag(autoCode);
+    setFormDescriptionTag('');
+    setFormName(`${autoCode}·新分支`);
+    setFormTag(autoCode);
     const usedColors = new Set(timelines.map((t) => t.color));
     const nextColor = TIMELINE_COLORS.find((c) => !usedColors.has(c.id)) || TIMELINE_COLORS[0];
     setFormColor(nextColor.id);
-    setFormParentId(parentId || activeTimelineId || '');
+    setFormParentId(parent);
     setFormDescription('');
     setFormPlotSummary('自该分化节点起展开新剧情。');
     setActiveTab('create');
@@ -91,6 +111,8 @@ export const TimelineModal: React.FC<TimelineModalProps> = ({
     setEditingTimelineId(t.id);
     setFormName(t.name);
     setFormTag(t.tag);
+    setFormCodeTag(t.codeTag || t.tag);
+    setFormDescriptionTag(t.descriptionTag || t.tag);
     setFormColor(t.color);
     setFormParentId(t.parentId || '');
     setFormDescription(t.description);
@@ -100,7 +122,9 @@ export const TimelineModal: React.FC<TimelineModalProps> = ({
 
   const handleSaveTimeline = () => {
     if (!formName.trim()) return;
-    const tag = formTag.trim() || formName.trim().slice(0, 6);
+    const codeTag = formCodeTag.trim() || 'A1';
+    const descTag = formDescriptionTag.trim() || formName.trim().slice(0, 10);
+    const tag = descTag || codeTag;
     const desc =
       formDescription.trim() ||
       `在「${formName.trim()}」分支下的独立设定，区别于其他时间线。`;
@@ -114,6 +138,8 @@ export const TimelineModal: React.FC<TimelineModalProps> = ({
               ...t,
               name: formName.trim(),
               tag,
+              codeTag,
+              descriptionTag: descTag,
               color: formColor,
               parentId: formParentId || undefined,
               description: desc,
@@ -127,7 +153,7 @@ export const TimelineModal: React.FC<TimelineModalProps> = ({
         // Also update message cached tags
         const nextMessages = prev.messages.map((m) => {
           if (m.timelineId === editingTimelineId) {
-            return { ...m, timelineTag: tag };
+            return { ...m, timelineTag: tag, codeTag, descriptionTag: descTag };
           }
           return m;
         });
@@ -146,6 +172,9 @@ export const TimelineModal: React.FC<TimelineModalProps> = ({
         id: newId,
         name: formName.trim(),
         tag,
+        codeTag,
+        descriptionTag: descTag,
+        visible: true,
         color: formColor,
         description: desc,
         plotSummary: formPlotSummary.trim() || '新时间线分支已建立，等待探索。',
@@ -337,14 +366,32 @@ export const TimelineModal: React.FC<TimelineModalProps> = ({
                       {/* Top Bar of Timeline Card */}
                       <div className="flex items-start justify-between gap-2 mb-2">
                         <div className="flex items-center gap-2 flex-wrap">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleVisibility(t.id)}
+                            className={`p-1 rounded-md transition-colors ${
+                              t.visible !== false
+                                ? 'text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/50'
+                                : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800'
+                            }`}
+                            title={t.visible !== false ? '当前分支AI可见（点击切换为隐藏，跳过不发给AI）' : '当前分支已隐藏（点击切换为可见）'}
+                          >
+                            {t.visible !== false ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4 text-rose-500" />}
+                          </button>
+
                           <span
                             className={`px-2 py-0.5 text-xs rounded-full font-bold shadow-xs ${colorConfig.badge}`}
                           >
-                            {t.tag}
+                            {t.codeTag || t.tag}
                           </span>
                           <span className="font-bold text-sm text-slate-900 dark:text-slate-100">
-                            {t.name}
+                            {t.descriptionTag ? `${t.codeTag ? `${t.codeTag}·` : ''}${t.descriptionTag}` : t.name}
                           </span>
+                          {t.visible === false && (
+                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-rose-500/10 text-rose-600 dark:text-rose-400 font-semibold border border-rose-500/20">
+                              已隐藏(跳过)
+                            </span>
+                          )}
                           {isActive && (
                             <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-semibold border border-emerald-500/20">
                               当前聚焦
@@ -353,7 +400,7 @@ export const TimelineModal: React.FC<TimelineModalProps> = ({
                           {parent && (
                             <div className="flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
                               <ArrowRight className="w-3 h-3 text-slate-400" />
-                              <span>分化自: {parent.name}</span>
+                              <span>分化自: {parent.codeTag ? `[${parent.codeTag}] ` : ''}{parent.name}</span>
                             </div>
                           )}
                         </div>
@@ -462,33 +509,48 @@ export const TimelineModal: React.FC<TimelineModalProps> = ({
                 </button>
               </div>
 
-              {/* Timeline Name & Tag */}
+              {/* Dual Tags: Code Tag + Description Tag */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    时间线名称 *
-                  </label>
-                  <input
-                    type="text"
-                    value={formName}
-                    onChange={(e) => setFormName(e.target.value)}
-                    placeholder="例如：五年后要塞防守战 / IF线：大学时光"
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    短标签 (Tag)
+                    编号标签 (Code Tag, 如 A1, A12) *
                   </label>
                   <input
                     type="text"
-                    value={formTag}
-                    onChange={(e) => setFormTag(e.target.value)}
-                    maxLength={8}
-                    placeholder="例如：五年后"
+                    value={formCodeTag}
+                    onChange={(e) => setFormCodeTag(e.target.value.toUpperCase())}
+                    placeholder="例如：A12"
+                    className="w-full px-3 py-2 text-xs font-mono font-bold rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-0.5">用户在输入框键入此编号可秒切分支</p>
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    描述标签 (如 下药线·感情上头) *
+                  </label>
+                  <input
+                    type="text"
+                    value={formDescriptionTag}
+                    onChange={(e) => setFormDescriptionTag(e.target.value)}
+                    placeholder="人类可读分支描述，用·分隔层级"
                     className="w-full px-3 py-2 text-xs rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   />
+                  <p className="text-[10px] text-slate-400 mt-0.5">随对话推进展示在标签栏文字模式中</p>
                 </div>
+              </div>
+
+              {/* Timeline Name */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  时间线分支全称 *
+                </label>
+                <input
+                  type="text"
+                  value={formName}
+                  onChange={(e) => setFormName(e.target.value)}
+                  placeholder="例如：A12·下药线·因为感情上头"
+                  className="w-full px-3 py-2 text-xs rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
               </div>
 
               {/* Color Picker */}

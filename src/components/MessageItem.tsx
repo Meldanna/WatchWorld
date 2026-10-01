@@ -42,6 +42,9 @@ interface MessageItemProps {
   onEditContent: (messageId: string, newContent: string) => void;
   onDeleteMessage: (messageId: string) => void;
   onOpenTimelineModal?: (timelineId?: string) => void;
+  onToggleCommon?: (messageId: string) => void;
+  onToggleAnalysisVisibility?: (messageId: string) => void;
+  onSaveAnalysisToDoc?: (message: ChatMessage) => void;
 }
 
 export const MessageItem: React.FC<MessageItemProps> = ({
@@ -57,6 +60,9 @@ export const MessageItem: React.FC<MessageItemProps> = ({
   onEditContent,
   onDeleteMessage,
   onOpenTimelineModal,
+  onToggleCommon,
+  onToggleAnalysisVisibility,
+  onSaveAnalysisToDoc,
 }) => {
   const [copied, setCopied] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -150,15 +156,22 @@ export const MessageItem: React.FC<MessageItemProps> = ({
     >
       {/* Sender Header info */}
       <div
-        className={`flex items-center gap-2 mb-1 px-1 text-xs text-slate-500 dark:text-slate-400 ${
+        className={`flex items-center gap-1.5 mb-1 px-1 text-xs text-slate-500 dark:text-slate-400 flex-wrap ${
           isUser ? 'flex-row-reverse' : 'flex-row'
         }`}
       >
+        {/* Floor Number Badge (前端强制写入，消息唯一定位符) */}
+        {message.floorNumber && (
+          <span className="font-mono text-[11px] font-bold px-1.5 py-0.2 rounded bg-slate-200/80 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700/60 shadow-xs">
+            #{message.floorNumber}
+          </span>
+        )}
+
         {isAssistant ? (
           <>
-            <span className="text-base select-none">{agent?.avatar || '🤖'}</span>
+            <span className="text-base select-none">{message.isAnalysis ? '📊' : (agent?.avatar || '🤖')}</span>
             <span className="font-medium text-slate-700 dark:text-slate-200">
-              {agent?.name || 'AI 助手'}
+              {message.isAnalysis ? '角色关系分析Agent' : (agent?.name || 'AI 助手')}
             </span>
             {/* Model Name in Header if enabled */}
             {displaySettings.showModelName && currentModel && (
@@ -177,26 +190,52 @@ export const MessageItem: React.FC<MessageItemProps> = ({
           </>
         )}
 
-        {/* Timeline Branch Tag Badge */}
-        {message.timelineTag && displaySettings.showTimelineTag !== false && (
+        {/* Timeline Dual-Tag Badge */}
+        {displaySettings.showTimelineTag !== false && (
           <button
             type="button"
             onClick={() => onOpenTimelineModal?.(message.timelineId)}
-            title={`所属时间线分支: ${timelineBranch?.name || message.timelineTag} (点击查看记忆树)`}
+            title={`所属时间线分支: ${timelineBranch?.name || message.timelineTag || '通用'} (点击查看记忆树)`}
             className={`text-[10px] px-2 py-0.2 rounded-full font-bold flex items-center gap-1 border transition-all hover:scale-105 shadow-xs cursor-pointer ${
               timelineColor.badge
             }`}
           >
             <GitBranch size={10} />
-            <span>{message.timelineTag}</span>
+            <span>
+              {message.codeTag
+                ? `${message.codeTag}${message.descriptionTag ? `·${message.descriptionTag}` : ''}`
+                : (timelineBranch?.codeTag ? `${timelineBranch.codeTag}·${timelineBranch.tag}` : (message.timelineTag || '通用'))}
+            </span>
           </button>
+        )}
+
+        {/* Common Tag Badge */}
+        {message.isCommon && (
+          <span className="text-[10px] px-1.5 py-0.2 rounded font-bold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30">
+            通用
+          </span>
+        )}
+
+        {/* Analysis Card Badge */}
+        {message.isAnalysis && (
+          <span
+            className={`text-[10px] px-1.5 py-0.2 rounded font-medium border ${
+              message.analysisVisibility === 'hidden'
+                ? 'bg-slate-100 text-slate-500 border-slate-300 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'
+                : 'bg-emerald-50 text-emerald-600 border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800'
+            }`}
+          >
+            {message.analysisVisibility === 'hidden' ? '仅自己可见 (不占AI上下文)' : 'AI可见 (参与重排)'}
+          </span>
         )}
       </div>
 
       {/* Bubble Container with Theme */}
       <div
         className={`relative max-w-[94%] sm:max-w-[85%] rounded-2xl px-4 py-3 transition-all ${
-          isUser
+          message.isAnalysis
+            ? 'bg-gradient-to-br from-indigo-50/90 to-blue-50/90 dark:from-indigo-950/40 dark:to-slate-900 border border-indigo-200 dark:border-indigo-800/80 shadow-md text-slate-900 dark:text-slate-100'
+            : isUser
             ? `${theme.userBubble} rounded-tr-sm`
             : 'bg-white dark:bg-slate-900/90 text-slate-800 dark:text-slate-100 rounded-tl-sm border border-slate-200 dark:border-slate-800/80 shadow-sm'
         }`}
@@ -366,6 +405,48 @@ export const MessageItem: React.FC<MessageItemProps> = ({
             >
               <GitBranch size={12} />
             </button>
+          )}
+
+          {/* Toggle Common Message Button */}
+          {onToggleCommon && (
+            <button
+              type="button"
+              onClick={() => onToggleCommon(message.id)}
+              className={`px-1.5 py-0.5 rounded text-[10px] font-bold border transition-colors ${
+                message.isCommon
+                  ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/30'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-500 border-slate-300 dark:border-slate-700 hover:text-indigo-500'
+              }`}
+              title={message.isCommon ? "取消通用标记（归属特定分支）" : "标记为通用信息（所有分支共享，享受缓存）"}
+            >
+              {message.isCommon ? '已通用' : '设为通用'}
+            </button>
+          )}
+
+          {/* Special Actions for Analysis Card */}
+          {message.isAnalysis && (
+            <>
+              {onToggleAnalysisVisibility && (
+                <button
+                  type="button"
+                  onClick={() => onToggleAnalysisVisibility(message.id)}
+                  className="px-1.5 py-0.5 rounded text-[10px] bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700"
+                  title="切换可见性：隐藏只自己看，不进AI上下文；可见则参与后续重排"
+                >
+                  {message.analysisVisibility === 'hidden' ? '设为AI可见' : '隐藏不进AI'}
+                </button>
+              )}
+              {onSaveAnalysisToDoc && (
+                <button
+                  type="button"
+                  onClick={() => onSaveAnalysisToDoc(message)}
+                  className="px-1.5 py-0.5 rounded text-[10px] bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100"
+                  title="将本份心理博弈分析报告归档至设定文档区"
+                >
+                  存文档
+                </button>
+              )}
+            </>
           )}
 
           {/* Delete Button */}

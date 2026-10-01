@@ -35,7 +35,8 @@ app.post('/api/chat', async (req: Request, res: Response) => {
       systemInstruction,
       temperature = 0.7,
       maxTokens = 2048,
-      stream = false
+      stream = false,
+      customHeaders,
     } = req.body;
 
     // 1. Google Gemini Handling (Server-side key or user provided key)
@@ -107,6 +108,7 @@ app.post('/api/chat', async (req: Request, res: Response) => {
 
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
+        ...(customHeaders || {}),
       };
 
       if (apiKey) {
@@ -179,6 +181,7 @@ app.post('/api/chat', async (req: Request, res: Response) => {
         'Content-Type': 'application/json',
         'x-api-key': apiKey || '',
         'anthropic-version': '2023-06-01',
+        ...(customHeaders || {}),
       };
 
       const formattedMessages = (messages || []).map((m: any) => ({
@@ -230,8 +233,105 @@ app.post('/api/chat', async (req: Request, res: Response) => {
     } catch {
       // not JSON
     }
+
+    // Friendly explanation for quota / rate limit exhaustion
+    if (errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('Quota exceeded') || errMsg.includes('quota')) {
+      errMsg = `API 请求额度/速率受限 (429 Rate Limit / Quota Exceeded)。\n• 原因：当前模型请求频率过快或免费额度已达限额。\n• 刷新机制：Gemini/OpenAI 速率限制通常在每分钟或整点刷新，每日配额于 UTC 00:00 刷新。\n• 解决方案：请稍候重试，或在左上角设置中配置个人 API 密钥/自定义中转接口。`;
+    }
+
     return res.status(500).json({
       error: errMsg,
+    });
+  }
+});
+
+// Universal WebDAV proxy to prevent CORS issues with 3rd-party servers (Jianguoyun, Nextcloud, Alist, etc.)
+app.all('/api/webdav', async (req: Request, res: Response) => {
+  try {
+    const targetUrl = (req.headers['x-webdav-url'] as string) || (req.query.url as string);
+    const targetMethod = (req.headers['x-webdav-method'] as string) || req.method;
+
+    if (!targetUrl) {
+      return res.status(400).json({ error: 'Missing x-webdav-url header or url query param' });
+    }
+
+    const forwardHeaders: Record<string, string> = {};
+    if (req.headers['authorization']) {
+      forwardHeaders['Authorization'] = req.headers['authorization'] as string;
+    }
+    if (req.headers['depth']) {
+      forwardHeaders['Depth'] = req.headers['depth'] as string;
+    }
+    if (req.headers['content-type']) {
+      forwardHeaders['Content-Type'] = req.headers['content-type'] as string;
+    }
+
+    let requestBody: any = undefined;
+    if (['POST', 'PUT', 'PATCH'].includes(targetMethod.toUpperCase())) {
+      if (typeof req.body === 'string') {
+        requestBody = req.body;
+      } else if (req.body && Object.keys(req.body).length > 0) {
+        requestBody = JSON.stringify(req.body);
+      }
+    }
+
+    const upstreamResponse = await fetch(targetUrl, {
+      method: targetMethod,
+      headers: forwardHeaders,
+      body: requestBody,
+    });
+
+    res.status(upstreamResponse.status);
+    upstreamResponse.headers.forEach((val, key) => {
+      if (!['content-encoding', 'content-length', 'transfer-encoding'].includes(key.toLowerCase())) {
+        res.setHeader(key, val);
+      }
+    });
+
+    const responseData = await upstreamResponse.text();
+    return res.send(responseData);
+  } catch (err: any) {
+    return res.status(502).json({ error: `WebDAV 代理转发失败: ${err.message}` });
+  }
+});
+
+// Quota check endpoint to check API status and responsiveness
+app.get('/api/check-quota', async (req: Request, res: Response) => {
+  try {
+    const key = (req.query.apiKey as string) || process.env.GEMINI_API_KEY;
+    if (!key) {
+      return res.json({
+        available: false,
+        message: '未配置任何 API Key，可使用本地免后台模式或在设置中输入 Key。',
+        refreshed: false,
+      });
+    }
+
+    const ai = new GoogleGenAI({ apiKey: key });
+    const pingRes = await ai.models.generateContent({
+      model: 'gemini-3.8-flash',
+      contents: [{ role: 'user', parts: [{ text: 'ping' }] }],
+      config: { maxOutputTokens: 5, temperature: 0.1 },
+    });
+
+    return res.json({
+      available: true,
+      refreshed: true,
+      message: 'API 服务响应正常，额度充沛可用！',
+      preview: pingRes.text?.trim() || 'pong',
+      timestamp: Date.now(),
+    });
+  } catch (err: any) {
+    const msg = err?.message || String(err);
+    const isExhausted = msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED') || msg.includes('quota');
+    return res.json({
+      available: false,
+      refreshed: !isExhausted,
+      isExhausted,
+      message: isExhausted
+        ? '当前模型额度已达限额，通常每分钟或次日 UTC 0 点自动刷新。'
+        : `服务返回: ${msg.slice(0, 100)}`,
+      timestamp: Date.now(),
     });
   }
 });

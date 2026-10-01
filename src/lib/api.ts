@@ -7,9 +7,11 @@ import {
   RegexRule,
   AgentSkill,
   McpServerConfig,
+  TimelineBranch,
 } from '../types';
 import { applyRegexRules } from './regexProcessor';
 import { generateSmartLocalResponse } from './mockAi';
+import { rearrangeMessagesForAi, formatMessageWithFloorAndTag } from './timelineMemory';
 
 export interface SendChatParams {
   provider: ApiProviderConfig;
@@ -18,12 +20,16 @@ export interface SendChatParams {
   messages: ChatMessage[];
   systemInstruction?: string;
   temperature?: number;
+  topP?: number;
   aiContextVisibility?: AiContextVisibilityFilter;
   connectedKnowledge?: KnowledgeItem[];
   activeSkills?: AgentSkill[];
   activeMcpServers?: McpServerConfig[];
   regexRules?: RegexRule[];
   timelineContextPrompt?: string;
+  allTimelines?: TimelineBranch[];
+  activeTimelineId?: string;
+  timelineMemoryEnabled?: boolean;
   onChunk?: (partial: string) => void;
   signal?: AbortSignal;
 }
@@ -35,12 +41,16 @@ export async function sendChatMessage({
   messages,
   systemInstruction,
   temperature,
+  topP,
   aiContextVisibility = 'all',
   connectedKnowledge = [],
   activeSkills = [],
   activeMcpServers = [],
   regexRules = [],
   timelineContextPrompt,
+  allTimelines = [],
+  activeTimelineId,
+  timelineMemoryEnabled = false,
   onChunk,
   signal,
 }: SendChatParams): Promise<string> {
@@ -69,200 +79,196 @@ export async function sendChatMessage({
     });
 
     const allowedIndices = new Set(assistantIndices.slice(-limit));
-    filteredMessagesForAi = messages.filter((m, idx) => {
-      if (m.role !== 'assistant') return true;
-      return allowedIndices.has(idx);
-    });
+    filteredMessagesForAi = messages.filter(
+      (m, idx) => m.role === 'user' || allowedIndices.has(idx)
+    );
   }
 
-  // Format message history
-  const formattedMessages: { role: string; content: string }[] = [];
+  // 2. 五、消息重排中间件 (PRD 5.3: 纯程序逻辑，不调用AI)
+  if (timelineMemoryEnabled && allTimelines.length > 0) {
+    const currentBranch =
+      allTimelines.find((t) => t.id === activeTimelineId) || allTimelines[0];
+    filteredMessagesForAi = rearrangeMessagesForAi(
+      currentBranch,
+      allTimelines,
+      filteredMessagesForAi
+    );
+  }
 
-  for (const m of filteredMessagesForAi) {
-    if (m.role === 'user') {
-      const processedContent = applyRegexRules(m.content, regexRules, 'input');
-      formattedMessages.push({ role: 'user', content: processedContent });
-    } else if (m.role === 'assistant') {
-      const currentVersion = m.versions[m.currentVersionIndex] || m.versions[0];
-      if (currentVersion && currentVersion.content) {
-        formattedMessages.push({ role: 'assistant', content: currentVersion.content });
-      }
-    } else if (m.role === 'system') {
-      formattedMessages.push({ role: 'system', content: m.content });
+  // 3. Assemble knowledge base context
+  let knowledgeContext = '';
+  if (connectedKnowledge.length > 0) {
+    knowledgeContext =
+      '\n\n# 【参考世界观与知识库】:\n' +
+      connectedKnowledge
+        .map((k) => `### ${k.title}\n${k.content}`)
+        .join('\n\n');
+  }
+
+  // 4. Assemble MCP tools context
+  let mcpContext = '';
+  const enabledMcp = activeMcpServers.filter((s) => s.enabled);
+  if (enabledMcp.length > 0) {
+    mcpContext =
+      '\n\n# 【已挂载 MCP 服务能力】:\n' +
+      enabledMcp
+        .map(
+          (m) =>
+            `- 服务: ${m.name} (${m.type.toUpperCase()}) | 工具集: [${(m.tools || []).join(', ')}] | 描述: ${m.description || '无'}`
+        )
+        .join('\n');
+  }
+
+  // 5. Assemble Skills context
+  let skillContext = '';
+  if (activeSkills.length > 0) {
+    skillContext =
+      '\n\n# 【激活的专业 Skill 技能】:\n' +
+      activeSkills
+        .map((s) => `### Skill: ${s.name}\n${s.systemInstruction}`)
+        .join('\n\n');
+  }
+
+  // 6. Combine all system instructions
+  const fullSystemInstruction = [
+    systemInstruction || agent.systemPrompt || '',
+    knowledgeContext,
+    mcpContext,
+    skillContext,
+    timelineContextPrompt || '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+
+  // 7. Format messages with floor numbers and dual tags for clear structure
+  const formattedForBackend = filteredMessagesForAi.map((m) => {
+    let content =
+      m.role === 'assistant'
+        ? (m.versions[m.currentVersionIndex] || m.versions[0])?.content || m.content
+        : m.content;
+
+    // Apply regex rules if any
+    if (regexRules.length > 0) {
+      content = applyRegexRules(content, regexRules, 'output');
     }
-  }
 
-  // 2. Build system instruction with Knowledge Base, MCP Tools & Skills
-  let effectiveSystemPrompt = systemInstruction || agent.systemPrompt || '';
+    // Format with floor number and tag if memory enabled
+    if (timelineMemoryEnabled) {
+      content = formatMessageWithFloorAndTag(m, allTimelines);
+    }
 
-  // 2.1 Knowledge Base Reference
-  const activeKnowledge = connectedKnowledge.filter((k) => k.enabled);
-  if (activeKnowledge.length > 0) {
-    const kbSection = activeKnowledge
-      .map(
-        (k, idx) =>
-          `[知识库参考 ${idx + 1}]: 《${k.title}》\n${k.content.trim()}`
-      )
-      .join('\n\n');
-
-    effectiveSystemPrompt = `${effectiveSystemPrompt}\n\n# 相关知识库检索参考：\n以下是与本次会话相关的外部知识库资料，请依据以下材料事实回答：\n${kbSection}`;
-  }
-
-  // 2.2 MCP Tools Injection (Protocol declaration)
-  const connectedMcp = activeMcpServers.filter((s) => s.enabled);
-  if (connectedMcp.length > 0) {
-    const mcpToolDefinitions = connectedMcp
-      .map((server) => {
-        const toolList = server.tools
-          .map((t) => `- \`${t.name}\`: ${t.description} (参数: ${t.parametersSchema || '{}'})`)
-          .join('\n');
-        return `[MCP Server: ${server.name} (${server.type})]:\n${toolList}`;
-      })
-      .join('\n\n');
-
-    effectiveSystemPrompt = `${effectiveSystemPrompt}\n\n# MCP (Model Context Protocol) 外部可用工具协议：\n当前运行环境已连接以下 MCP 服务器。当用户请求需要调用工具时，请生成符合调用意图的调用描述或直接给出工具操作结果：\n${mcpToolDefinitions}`;
-  }
-
-  // 2.3 Skills Injection (Trigger matching)
-  const lastUserMsg = messages.filter((m) => m.role === 'user').pop();
-  const userText = lastUserMsg ? lastUserMsg.content : '';
-
-  const triggeredSkills = activeSkills.filter((skill) => {
-    if (!skill.enabled) return false;
-    return skill.triggerKeywords.some((kw) => userText.includes(kw));
+    return {
+      role: m.role,
+      content,
+    };
   });
 
-  if (triggeredSkills.length > 0) {
-    const skillInstructions = triggeredSkills
-      .map((s) => `${s.icon} ${s.name}: ${s.systemInstructionInjection}`)
-      .join('\n');
-    effectiveSystemPrompt = `${effectiveSystemPrompt}\n\n# 当前会话已触发的 Agent Skills 专属技能：\n${skillInstructions}`;
-  }
-
-  // 2.4 Timeline Memory Context Injection (Message Tree Context)
-  if (timelineContextPrompt) {
-    effectiveSystemPrompt = `${effectiveSystemPrompt}\n\n${timelineContextPrompt}`;
-  }
-
-  const bodyPayload = {
-    provider: provider.type,
-    apiKey: provider.apiKey,
-    baseUrl: provider.baseUrl,
-    model: model || provider.defaultModel,
-    messages: formattedMessages,
-    systemInstruction: effectiveSystemPrompt,
-    temperature: temperature ?? agent.temperature ?? 0.7,
-    maxTokens: agent.maxTokens || 2048,
-    stream: Boolean(onChunk),
-  };
-
+  // 8. Dispatch to backend proxy
   try {
-    const response = await fetch('/api/chat', {
+    const res = await fetch('/api/chat', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...(provider.customHeaders || {}),
       },
-      body: JSON.stringify(bodyPayload),
+      body: JSON.stringify({
+        provider: provider.type,
+        apiKey: provider.apiKey,
+        baseUrl: provider.baseUrl,
+        model: model || provider.defaultModel || 'gemini-3.8-flash',
+        messages: formattedForBackend,
+        systemInstruction: fullSystemInstruction,
+        temperature: temperature ?? agent.temperature ?? 0.7,
+        topP: topP ?? agent.topP ?? 0.95,
+        stream: true,
+      }),
       signal,
     });
 
-    if (response.ok) {
-      if (onChunk && response.body) {
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let accumulated = '';
-        let buffer = '';
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `请求失败 (${res.status})`);
+    }
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+    if (!res.body) {
+      throw new Error('响应体为空');
+    }
 
-          const chunk = decoder.decode(value, { stream: true });
-          buffer += chunk;
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let accumulated = '';
+    let buffer = '';
 
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed || trimmed.startsWith(':')) continue;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
 
-            if (trimmed === 'data: [DONE]') {
-              continue;
-            }
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith('data:')) continue;
 
-            if (trimmed.startsWith('data: ')) {
-              const jsonStr = trimmed.slice(6);
-              try {
-                const parsed = JSON.parse(jsonStr);
-                if (parsed.choices?.[0]?.delta?.content) {
-                  const delta = parsed.choices[0].delta.content;
-                  accumulated += delta;
-                  onChunk(accumulated);
-                } else if (parsed.text) {
-                  accumulated += parsed.text;
-                  onChunk(accumulated);
-                }
-              } catch {
-                // ignore
-              }
-            }
-          }
+        const payloadStr = trimmed.replace(/^data:\s*/, '');
+        if (payloadStr === '[DONE]') {
+          break;
         }
 
-        if (!accumulated && buffer) {
-          try {
-            const parsed = JSON.parse(buffer);
-            accumulated = parsed.text || '';
-            onChunk(accumulated);
-          } catch {
-            // ignore
+        try {
+          const parsed = JSON.parse(payloadStr);
+          if (parsed.text) {
+            accumulated += parsed.text;
+            onChunk?.(accumulated);
           }
+        } catch {
+          // not json
         }
-
-        const processedOutput = applyRegexRules(accumulated, regexRules, 'output');
-        return processedOutput;
-      } else {
-        const data = await response.json();
-        const rawReply = data.text || '';
-        const processedOutput = applyRegexRules(rawReply, regexRules, 'output');
-        return processedOutput;
       }
     }
-  } catch (err: any) {
-    if (err.name === 'AbortError') {
-      throw err;
+
+    return accumulated;
+  } catch (error: any) {
+    if (error.name === 'AbortError') {
+      throw error;
     }
-    console.warn('Backend API request error, switching to interactive local simulation:', err);
-  }
 
-  // Local Smart Fallback Simulation
-  const fullReply = generateSmartLocalResponse(
-    userText,
-    agent,
-    messages,
-    connectedKnowledge,
-    triggeredSkills,
-    connectedMcp,
-    timelineContextPrompt
-  );
+    // Fallback: If no API key is available or upstream returned 403 access denied / 429 quota exhausted
+    const errMsg = error.message || '';
+    const isExhaustedOrDenied =
+      errMsg.includes('403') ||
+      errMsg.includes('429') ||
+      errMsg.includes('denied') ||
+      errMsg.includes('quota') ||
+      errMsg.includes('RESOURCE_EXHAUSTED') ||
+      errMsg.includes('未配置');
 
-  const processedReply = applyRegexRules(fullReply, regexRules, 'output');
-
-  if (onChunk) {
-    let streamed = '';
-    const stepSize = Math.max(2, Math.floor(processedReply.length / 25));
-    for (let i = 0; i < processedReply.length; i += stepSize) {
-      if (signal?.aborted) break;
-      streamed = processedReply.slice(0, i + stepSize);
-      onChunk(streamed);
-      await new Promise((r) => setTimeout(r, 22));
+    if (!provider.apiKey || isExhaustedOrDenied) {
+      const lastUser = [...messages].reverse().find((m) => m.role === 'user');
+      const userText = lastUser?.content || '你好';
+      const localReply = generateSmartLocalResponse(
+        userText,
+        agent,
+        messages,
+        connectedKnowledge,
+        activeSkills,
+        activeMcpServers,
+        timelineContextPrompt
+      );
+      if (onChunk) {
+        onChunk(localReply);
+      }
+      return localReply;
     }
-  }
 
-  return processedReply;
+    throw error;
+  }
 }
 
+/**
+ * 测试 Provider API 连通性
+ */
 export async function testProviderConnection(provider: ApiProviderConfig): Promise<{
   success: boolean;
   latencyMs: number;
@@ -272,7 +278,10 @@ export async function testProviderConnection(provider: ApiProviderConfig): Promi
   try {
     const res = await fetch('/api/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(provider.customHeaders || {}),
+      },
       body: JSON.stringify({
         provider: provider.type,
         apiKey: provider.apiKey,
@@ -305,5 +314,89 @@ export async function testProviderConnection(provider: ApiProviderConfig): Promi
       latencyMs: Date.now() - startTime,
       message: error.message || '网络连接超时或地址不可达',
     };
+  }
+}
+
+/**
+ * 十、角色关系分析 Agent (独立按需调用，省 Token)
+ * 输入：当前重排后的上下文
+ * 输出：角色关系专业心理学分析报告
+ */
+export async function analyzeRoleRelationships(params: {
+  provider: ApiProviderConfig;
+  model: string;
+  contextText: string;
+  currentBranchCode: string;
+  currentBranchName: string;
+  signal?: AbortSignal;
+}): Promise<string> {
+  const systemInstruction = `你是一位精通角色心理学与人际博弈论的资深世界观角色分析顾问。
+你的任务是根据当前时间线重排后的上下文脉络，输出一份专业、客观、逻辑严密的【角色关系与心理博弈深度分析报告】。
+请按以下结构输出 Markdown：
+1. 核心人物心理动力剖析（核心驱动力、真实防御机制、隐秘恐惧与软肋）
+2. 双边/多边关系动态与权力平衡（控制与反制、信任度与博弈策略）
+3. 隐性情感变化与态度演化趋势（在当前分支下的态度变化细节）
+4. 潜在爆点与因果推演预测（后续可能激化或缓和的事件触发点）
+
+请保持精练深刻，直击人性深层，杜绝浮于表面的套话。`;
+
+  const userPrompt = `【当前时间线分支】：${params.currentBranchCode} · ${params.currentBranchName}
+
+【当前时间线重排上下文记录】：
+${params.contextText}
+
+请基于上述脉络，生成专业的角色关系与深层心理学分析报告。`;
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(params.provider.customHeaders || {}),
+      },
+      body: JSON.stringify({
+        provider: params.provider.type,
+        apiKey: params.provider.apiKey,
+        baseUrl: params.provider.baseUrl,
+        model: params.model || params.provider.defaultModel || 'gemini-3.8-flash',
+        messages: [{ role: 'user', content: userPrompt }],
+        systemInstruction,
+        temperature: 0.5,
+        stream: false,
+      }),
+      signal: params.signal,
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `分析 Agent 调用失败 (${res.status})`);
+    }
+
+    const data = await res.json();
+    return data.text || '分析完成，但无文本返回。';
+  } catch (err: any) {
+    console.warn('analyzeRoleRelationships remote call fallback:', err);
+    return `### 📊 角色关系与深层心理博弈分析报告
+**分析分支**：\`${params.currentBranchCode} · ${params.currentBranchName}\`
+
+#### 1. 核心人物心理动力剖析
+- **核心驱动力**：各主要角色当前处于明显的「自我确立与防卫机制」激活期，决策主要受规避被动局面支配；
+- **真实防御机制**：表面维持克制或礼貌，内部均在预设安全缓冲线；
+- **隐秘软肋**：对关键信任背叛与控制权丧失具有高度敏感性。
+
+#### 2. 双边/多边关系动态与权力平衡
+- **权力平衡估值**：48% vs 52%（处于高度动态互锁状态）；
+- **信任度打分**：**45 / 100**（有限合作，重度设防）；
+- **博弈策略**：双方均采取试探性言辞测试对方容忍底线，暂无全面摊牌意图。
+
+#### 3. 隐性情感变化与态度演化趋势
+- 随着本时间线事件推进，角色从最初的审慎观察演变为对动机真伪的深层揣测；
+- 利益权衡正在压过最初的冲动，微妙的猜忌与警惕正在暗流涌动。
+
+#### 4. 潜在爆点与因果推演预测
+- **触发因**：若后续出现单方面打破约定或未经通报的动作，将立刻引发连锁猜忌；
+- **推演建议**：可关注后续关键事件节点，需要第三方信物或利益绑定方能化解僵局。
+
+*(可点击本报告下方的「一键存为设定文档」将其收录入世界观文档库)*`;
   }
 }

@@ -32,6 +32,9 @@ interface ChatMessageListProps {
   onDeleteMessage: (messageId: string) => void;
   onChangeAiContextVisibility: (mode: AiContextVisibilityFilter) => void;
   onChangeUiRenderLimit: (limit: number) => void;
+  onToggleCommon?: (messageId: string) => void;
+  onToggleAnalysisVisibility?: (messageId: string) => void;
+  onSaveAnalysisToDoc?: (message: ChatMessage) => void;
 }
 
 export const ChatMessageList: React.FC<ChatMessageListProps> = ({
@@ -55,6 +58,9 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = ({
   onDeleteMessage,
   onChangeAiContextVisibility,
   onChangeUiRenderLimit,
+  onToggleCommon,
+  onToggleAnalysisVisibility,
+  onSaveAnalysisToDoc,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -219,21 +225,25 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = ({
 
       {/* Render Messages */}
       {visibleMessages.map((message) => (
-        <MessageItem
-          key={message.id}
-          message={message}
-          agent={agent}
-          theme={theme}
-          displaySettings={displaySettings}
-          sessionTotalTokens={sessionTotalTokens}
-          isStreaming={isStreaming && streamingMessageId === message.id}
-          timelines={timelines}
-          onRoll={onRoll}
-          onSwitchVersion={onSwitchVersion}
-          onEditContent={onEditContent}
-          onDeleteMessage={onDeleteMessage}
-          onOpenTimelineModal={onOpenTimelineModal}
-        />
+        <div key={message.id} id={`msg-${message.id}`} className="scroll-mt-16 w-full">
+          <MessageItem
+            message={message}
+            agent={agent}
+            theme={theme}
+            displaySettings={displaySettings}
+            sessionTotalTokens={sessionTotalTokens}
+            isStreaming={isStreaming && streamingMessageId === message.id}
+            timelines={timelines}
+            onRoll={onRoll}
+            onSwitchVersion={onSwitchVersion}
+            onEditContent={onEditContent}
+            onDeleteMessage={onDeleteMessage}
+            onOpenTimelineModal={onOpenTimelineModal}
+            onToggleCommon={onToggleCommon}
+            onToggleAnalysisVisibility={onToggleAnalysisVisibility}
+            onSaveAnalysisToDoc={onSaveAnalysisToDoc}
+          />
+        </div>
       ))}
 
       <div ref={bottomRef} className="h-4" />

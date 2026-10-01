@@ -54,6 +54,7 @@ export const ProviderModal: React.FC<ProviderModalProps> = ({
   const [apiKey, setApiKey] = useState('');
   const [modelsStr, setModelsStr] = useState('');
   const [defaultModel, setDefaultModel] = useState('');
+  const [customHeadersStr, setCustomHeadersStr] = useState('');
 
   if (!isOpen) return null;
 
@@ -70,6 +71,7 @@ export const ProviderModal: React.FC<ProviderModalProps> = ({
     setApiKey('');
     setModelsStr('gpt-4o, gpt-4o-mini');
     setDefaultModel('gpt-4o-mini');
+    setCustomHeadersStr('');
   };
 
   const startEdit = (p: ApiProviderConfig) => {
@@ -77,10 +79,11 @@ export const ProviderModal: React.FC<ProviderModalProps> = ({
     setIsCreating(false);
     setName(p.name);
     setType(p.type);
-    setBaseUrl(p.baseUrl);
-    setApiKey(p.apiKey);
+    setBaseUrl(p.baseUrl || '');
+    setApiKey(p.apiKey || '');
     setModelsStr(p.models.join(', '));
     setDefaultModel(p.defaultModel);
+    setCustomHeadersStr(p.customHeaders ? JSON.stringify(p.customHeaders, null, 2) : '');
   };
 
   const handleSaveForm = (e: React.FormEvent) => {
@@ -92,6 +95,23 @@ export const ProviderModal: React.FC<ProviderModalProps> = ({
       .map((m) => m.trim())
       .filter(Boolean);
 
+    let parsedHeaders: Record<string, string> | undefined = undefined;
+    if (customHeadersStr.trim()) {
+      try {
+        parsedHeaders = JSON.parse(customHeadersStr.trim());
+      } catch {
+        parsedHeaders = {};
+        customHeadersStr.split('\n').forEach((line) => {
+          const colonIdx = line.indexOf(':');
+          if (colonIdx > 0) {
+            const k = line.slice(0, colonIdx).trim();
+            const v = line.slice(colonIdx + 1).trim();
+            if (k) parsedHeaders![k] = v;
+          }
+        });
+      }
+    }
+
     const providerToSave: ApiProviderConfig = {
       id: editingProvider?.id || `provider-custom-${Date.now()}`,
       name: name.trim(),
@@ -102,6 +122,7 @@ export const ProviderModal: React.FC<ProviderModalProps> = ({
       defaultModel: defaultModel.trim() || parsedModels[0] || 'gpt-4o-mini',
       enabled: true,
       isSystemDefault: editingProvider?.isSystemDefault || false,
+      customHeaders: parsedHeaders,
     };
 
     onSaveProvider(providerToSave);
@@ -266,6 +287,22 @@ export const ProviderModal: React.FC<ProviderModalProps> = ({
                   className="w-full bg-slate-950 p-2 rounded-xl border border-slate-700 focus:outline-none focus:border-emerald-500 text-slate-100 font-mono text-[11px]"
                 />
               </div>
+            </div>
+
+            <div>
+              <label className="block text-[11px] text-slate-400 mb-1">
+                自定义请求头 (Headers) - 适配不同中转站
+              </label>
+              <textarea
+                value={customHeadersStr}
+                onChange={(e) => setCustomHeadersStr(e.target.value)}
+                placeholder={'{\n  "HTTP-Referer": "https://guanjie.app",\n  "X-Title": "观界工作台"\n}'}
+                rows={3}
+                className="w-full bg-slate-950 p-2 rounded-xl border border-slate-700 focus:outline-none focus:border-emerald-500 text-slate-100 font-mono text-[11px] resize-none"
+              />
+              <span className="text-[10px] text-slate-500 mt-0.5 block">
+                支持 JSON 格式或每行一条 &quot;Header: Value&quot;，适合聚合站、OneAPI、自建中转认证。
+              </span>
             </div>
 
             <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">

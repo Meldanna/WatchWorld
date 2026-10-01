@@ -11,6 +11,8 @@ export interface ThemeConfig {
   primaryText: string;
   userBubble: string;
   accentBadge: string;
+  badgeBg: string;
+  badgeText: string;
 }
 
 export const THEMES: Record<ThemePalette, ThemeConfig> = {
@@ -25,6 +27,8 @@ export const THEMES: Record<ThemePalette, ThemeConfig> = {
     primaryText: 'text-emerald-500 dark:text-emerald-400',
     userBubble: 'bg-emerald-600 text-white shadow-sm',
     accentBadge: 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-500/40',
+    badgeBg: 'bg-emerald-500/15',
+    badgeText: 'text-emerald-600 dark:text-emerald-400',
   },
   blue: {
     id: 'blue',
@@ -37,6 +41,8 @@ export const THEMES: Record<ThemePalette, ThemeConfig> = {
     primaryText: 'text-blue-500 dark:text-blue-400',
     userBubble: 'bg-blue-600 text-white shadow-sm',
     accentBadge: 'bg-blue-100 text-blue-800 border-blue-300 dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-500/40',
+    badgeBg: 'bg-blue-500/15',
+    badgeText: 'text-blue-600 dark:text-blue-400',
   },
   violet: {
     id: 'violet',
@@ -49,6 +55,8 @@ export const THEMES: Record<ThemePalette, ThemeConfig> = {
     primaryText: 'text-violet-500 dark:text-violet-400',
     userBubble: 'bg-violet-600 text-white shadow-sm',
     accentBadge: 'bg-violet-100 text-violet-800 border-violet-300 dark:bg-violet-950/60 dark:text-violet-300 dark:border-violet-500/40',
+    badgeBg: 'bg-violet-500/15',
+    badgeText: 'text-violet-600 dark:text-violet-400',
   },
   rose: {
     id: 'rose',
@@ -61,6 +69,8 @@ export const THEMES: Record<ThemePalette, ThemeConfig> = {
     primaryText: 'text-rose-500 dark:text-rose-400',
     userBubble: 'bg-rose-600 text-white shadow-sm',
     accentBadge: 'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-500/40',
+    badgeBg: 'bg-rose-500/15',
+    badgeText: 'text-rose-600 dark:text-rose-400',
   },
   amber: {
     id: 'amber',
@@ -73,6 +83,8 @@ export const THEMES: Record<ThemePalette, ThemeConfig> = {
     primaryText: 'text-amber-500 dark:text-amber-400',
     userBubble: 'bg-amber-600 text-white shadow-sm',
     accentBadge: 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-500/40',
+    badgeBg: 'bg-amber-500/15',
+    badgeText: 'text-amber-600 dark:text-amber-400',
   },
   cyan: {
     id: 'cyan',
@@ -85,6 +97,8 @@ export const THEMES: Record<ThemePalette, ThemeConfig> = {
     primaryText: 'text-cyan-500 dark:text-cyan-400',
     userBubble: 'bg-cyan-600 text-white shadow-sm',
     accentBadge: 'bg-cyan-100 text-cyan-800 border-cyan-300 dark:bg-cyan-950/60 dark:text-cyan-300 dark:border-cyan-500/40',
+    badgeBg: 'bg-cyan-500/15',
+    badgeText: 'text-cyan-600 dark:text-cyan-400',
   },
   midnight: {
     id: 'midnight',
@@ -97,5 +111,7 @@ export const THEMES: Record<ThemePalette, ThemeConfig> = {
     primaryText: 'text-slate-600 dark:text-slate-300',
     userBubble: 'bg-slate-800 text-white border border-slate-700 shadow-sm',
     accentBadge: 'bg-slate-200 text-slate-800 border-slate-300 dark:bg-slate-800/80 dark:text-slate-200 dark:border-slate-600/50',
+    badgeBg: 'bg-slate-500/15',
+    badgeText: 'text-slate-700 dark:text-slate-300',
   },
 };

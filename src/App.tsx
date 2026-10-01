@@ -16,9 +16,11 @@ import {
   AgentSkill,
   MessageDisplaySettings,
   TimelineBranch,
+  WebDavConfig,
+  WorldDocument,
 } from './types';
 import { Storage } from './lib/storage';
-import { sendChatMessage } from './lib/api';
+import { sendChatMessage, analyzeRoleRelationships } from './lib/api';
 import { THEMES } from './lib/theme';
 import { applyRegexRules } from './lib/regexProcessor';
 import { estimateTokens } from './lib/tokenEstimator';
@@ -27,8 +29,10 @@ import {
   enrichTimelineProgression,
   buildTimelineTreePromptContext,
   createDefaultMainTimeline,
+  allocateTimelineCodeTag,
   TIMELINE_COLORS,
 } from './lib/timelineMemory';
+import { pullFromWebDav } from './lib/webdavSync';
 import { Header } from './components/Header';
 import { SidebarDrawer } from './components/SidebarDrawer';
 import { ChatMessageList } from './components/ChatMessageList';
@@ -45,6 +49,9 @@ import { McpModal } from './components/McpModal';
 import { SkillModal } from './components/SkillModal';
 import { SettingsModal } from './components/SettingsModal';
 import { TimelineModal } from './components/TimelineModal';
+import { PromptDualBoxModal } from './components/PromptDualBoxModal';
+import { SearchModal } from './components/SearchModal';
+import { DocumentModal } from './components/DocumentModal';
 
 export default function App() {
   // 1. Persistent State
@@ -75,6 +82,12 @@ export default function App() {
   const [sessions, setSessions] = useState<ChatSession[]>(() => Storage.getSessions());
   const [activeSessionId, setActiveSessionId] = useState<string>(() =>
     Storage.getActiveSessionId()
+  );
+  const [webdavConfig, setWebdavConfig] = useState<WebDavConfig>(() =>
+    Storage.getWebDavConfig()
+  );
+  const [worldDocuments, setWorldDocuments] = useState<WorldDocument[]>(() =>
+    Storage.getWorldDocuments()
   );
 
   // Active theme computed
@@ -107,13 +120,53 @@ export default function App() {
   const [isSkillModalOpen, setIsSkillModalOpen] = useState(false);
   const [isDisplaySettingsModalOpen, setIsDisplaySettingsModalOpen] = useState(false);
   const [isTimelineModalOpen, setIsTimelineModalOpen] = useState(false);
+  const [isDualBoxPromptModalOpen, setIsDualBoxPromptModalOpen] = useState(false);
+  const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
+  const [isDocumentModalOpen, setIsDocumentModalOpen] = useState(false);
   const [filterByActiveTimeline, setFilterByActiveTimeline] = useState(false);
 
-  // 3. Chat runtime states
-  const [inputDraft, setInputDraft] = useState('');
+  // 3. Chat runtime states & draft persistence
+  const [inputDraft, setInputDraft] = useState(() =>
+    Storage.getInputDraft(activeSession?.id || '')
+  );
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Sync draft per session
+  useEffect(() => {
+    if (activeSession?.id) {
+      setInputDraft(Storage.getInputDraft(activeSession.id));
+    }
+  }, [activeSession?.id]);
+
+  const handleDraftChange = (val: string) => {
+    setInputDraft(val);
+    if (activeSession?.id) {
+      Storage.setInputDraft(activeSession.id, val);
+    }
+  };
+
+  // 2.5 WebDAV: 启动时自动拉取最新数据，冲突以时间戳较新为准
+  useEffect(() => {
+    if (webdavConfig.enabled) {
+      pullFromWebDav(webdavConfig).then((res) => {
+        if (res.success && res.remoteData) {
+          try {
+            const parsed = JSON.parse(res.remoteData);
+            const localData = JSON.parse(Storage.exportAllData());
+            if ((parsed.exportTime || 0) > (localData.exportTime || 0)) {
+              Storage.importAllData(res.remoteData);
+              setSessions(Storage.getSessions());
+              setWorldDocuments(Storage.getWorldDocuments());
+            }
+          } catch {
+            // ignore
+          }
+        }
+      });
+    }
+  }, []);
 
   // Sync to HTML class for dark/light mode
   useEffect(() => {
@@ -268,10 +321,17 @@ export default function App() {
           const pickColor =
             TIMELINE_COLORS.find((c) => !usedColors.has(c.id)) || TIMELINE_COLORS[0];
 
+          const parentBranch = nextTimelines.find((t) => t.id === targetTimelineId);
+          const allocatedCode = allocateTimelineCodeTag(nextTimelines, parentBranch);
+          const branchDescName = detection.newTimelineName || `时间线 ${nextTimelines.length}`;
+
           const newBranch: TimelineBranch = {
             id: newId,
-            name: detection.newTimelineName || `时间线 ${nextTimelines.length}`,
-            tag: detection.newTimelineTag || `线${nextTimelines.length}`,
+            name: branchDescName,
+            tag: allocatedCode,
+            codeTag: allocatedCode,
+            descriptionTag: branchDescName,
+            visible: true,
             color: pickColor.id,
             description:
               detection.initialDescription ||
@@ -292,6 +352,16 @@ export default function App() {
     const currentBranch =
       nextTimelines.find((t) => t.id === targetTimelineId) || nextTimelines[0];
 
+    const currentMaxFloor = activeSession.messages.reduce(
+      (max, m) => Math.max(max, m.floorNumber || 0),
+      0
+    );
+
+    const isMainCommon =
+      targetTimelineId === 'timeline-main' ||
+      currentBranch.codeTag === '通用' ||
+      !activeSession.timelineMemoryEnabled;
+
     const userMessage: ChatMessage = {
       id: userMsgId,
       role: 'user',
@@ -301,7 +371,11 @@ export default function App() {
       versions: [],
       currentVersionIndex: 0,
       timelineId: targetTimelineId,
-      timelineTag: currentBranch.tag,
+      timelineTag: currentBranch.codeTag || currentBranch.tag,
+      floorNumber: currentMaxFloor + 1,
+      codeTag: currentBranch.codeTag || currentBranch.tag || '通用',
+      descriptionTag: currentBranch.descriptionTag || currentBranch.name || '通用世界观',
+      isCommon: isMainCommon,
     };
 
     const assistantMessage: ChatMessage = {
@@ -311,7 +385,11 @@ export default function App() {
       timestamp: Date.now(),
       currentVersionIndex: 0,
       timelineId: targetTimelineId,
-      timelineTag: currentBranch.tag,
+      timelineTag: currentBranch.codeTag || currentBranch.tag,
+      floorNumber: currentMaxFloor + 2,
+      codeTag: currentBranch.codeTag || currentBranch.tag || '通用',
+      descriptionTag: currentBranch.descriptionTag || currentBranch.name || '通用世界观',
+      isCommon: isMainCommon,
       versions: [
         {
           content: '',
@@ -341,6 +419,8 @@ export default function App() {
       activeTimelineId: targetTimelineId,
     }));
 
+    handleDraftChange('');
+
     setIsStreaming(true);
     setStreamingMessageId(assistantMsgId);
     const controller = new AbortController();
@@ -356,13 +436,28 @@ export default function App() {
         )
       : undefined;
 
+    // 3.2 提示词系统：双框组合与推入通用缓存
+    const baseSystemPrompt =
+      activeSession.systemPromptFixed ||
+      activeSession.systemPromptOverride ||
+      activeAgent.systemPrompt;
+
+    const combinedSystemInstruction = [
+      baseSystemPrompt,
+      activeSession.isCommonPushed && activeSession.systemPromptInjectedCommon
+        ? `\n# 【通用世界观基石缓存】:\n${activeSession.systemPromptInjectedCommon}`
+        : '',
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+
     try {
       const finalReply = await sendChatMessage({
         provider: activeProvider,
         agent: activeAgent,
         model: activeSession.model || activeProvider.defaultModel,
         messages: [...activeSession.messages, userMessage],
-        systemInstruction: activeSession.systemPromptOverride || activeAgent.systemPrompt,
+        systemInstruction: combinedSystemInstruction,
         temperature: activeAgent.temperature,
         aiContextVisibility: activeSession.aiContextVisibility || 'all',
         connectedKnowledge: connectedKnowledgeItems,
@@ -370,6 +465,9 @@ export default function App() {
         activeMcpServers: mcpServers,
         regexRules: regexRules,
         timelineContextPrompt: timelinePrompt,
+        allTimelines: nextTimelines,
+        activeTimelineId: targetTimelineId,
+        timelineMemoryEnabled: activeSession.timelineMemoryEnabled,
         signal: controller.signal,
         onChunk: (accumulated) => {
           updateCurrentSession((prev) => {
@@ -899,6 +997,21 @@ export default function App() {
     URL.revokeObjectURL(url);
   };
 
+  const handleImportJson = (jsonStr: string): boolean => {
+    const ok = Storage.importAllData(jsonStr);
+    if (ok) {
+      setSessions(Storage.getSessions());
+      setProviders(Storage.getProviders());
+      setAgents(Storage.getAgents());
+      setGroups(Storage.getGroups());
+      setPrompts(Storage.getPrompts());
+      setRegexRules(Storage.getRegexRules());
+      setWorldDocuments(Storage.getWorldDocuments());
+      setWebdavConfig(Storage.getWebDavConfig());
+    }
+    return ok;
+  };
+
   const handleImportData = () => {
     const fileInput = document.createElement('input');
     fileInput.type = 'file';
@@ -910,7 +1023,7 @@ export default function App() {
       reader.onload = (event) => {
         const content = event.target?.result as string;
         if (content) {
-          const ok = Storage.importAllData(content);
+          const ok = handleImportJson(content);
           if (ok) {
             alert('数据导入成功！页面将自动刷新应用配置。');
             window.location.reload();
@@ -922,6 +1035,273 @@ export default function App() {
       reader.readAsText(file);
     };
     fileInput.click();
+  };
+
+  // 4.4 标签与通用状态交互
+  const lastUserMessage = [...(activeSession?.messages || [])]
+    .reverse()
+    .find((m) => m.role === 'user');
+  const lastUserMessageTimelineId = lastUserMessage?.timelineId;
+
+  const handleToggleCommon = (messageId: string) => {
+    updateCurrentSession((prev) => {
+      const nextMessages = prev.messages.map((m) => {
+        if (m.id === messageId) {
+          const nextIsCommon = !m.isCommon;
+          return {
+            ...m,
+            isCommon: nextIsCommon,
+            codeTag: nextIsCommon ? '通用' : (m.codeTag === '通用' ? undefined : m.codeTag),
+            descriptionTag: nextIsCommon ? '通用世界观' : m.descriptionTag,
+          };
+        }
+        return m;
+      });
+      return { ...prev, messages: nextMessages };
+    });
+  };
+
+  const handleToggleAnalysisVisibility = (messageId: string) => {
+    updateCurrentSession((prev) => {
+      const nextMessages = prev.messages.map((m) => {
+        if (m.id === messageId) {
+          const currentVis = m.analysisVisibility || 'visible';
+          return {
+            ...m,
+            analysisVisibility: (currentVis === 'visible' ? 'hidden' : 'visible') as 'visible' | 'hidden',
+          };
+        }
+        return m;
+      });
+      return { ...prev, messages: nextMessages };
+    });
+  };
+
+  const handleSaveAnalysisToDoc = (message: ChatMessage) => {
+    const content =
+      message.role === 'assistant'
+        ? (message.versions[message.currentVersionIndex] || message.versions[0])?.content || message.content
+        : message.content;
+
+    const newDoc: WorldDocument = {
+      id: `doc-analysis-${Date.now()}`,
+      title: `心理博弈分析·#${message.floorNumber || 1} (${message.codeTag || '分析'})`,
+      category: 'analysis',
+      content,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      tags: ['角色分析', message.codeTag || '分析'],
+    };
+
+    setWorldDocuments((prev) => {
+      const next = [newDoc, ...prev];
+      Storage.setWorldDocuments(next);
+      return next;
+    });
+    alert('已将本篇角色心理动力学分析归档至世界观文档库！');
+  };
+
+  // 十、角色关系分析 Agent 独立调用
+  const handleTriggerRoleAnalysis = async () => {
+    if (isStreaming) return;
+    const sessionTimelines = activeSession.timelines || [];
+    const activeTimeline =
+      sessionTimelines.find((t) => t.id === activeSession.activeTimelineId) ||
+      sessionTimelines[0];
+
+    const branchCode = activeTimeline?.codeTag || activeTimeline?.tag || '通用';
+    const branchName = activeTimeline?.descriptionTag || activeTimeline?.name || '主线';
+
+    const contextSnippets = activeSession.messages
+      .map((m) => {
+        const text =
+          m.role === 'assistant'
+            ? (m.versions[m.currentVersionIndex] || m.versions[0])?.content || m.content
+            : m.content;
+        const tag = m.codeTag || '通用';
+        return `[${tag}] #${m.floorNumber || 1} ${m.role === 'user' ? '用户' : 'AI'}: ${text}`;
+      })
+      .join('\n');
+
+    setIsStreaming(true);
+    const tempMsgId = `analysis-${Date.now()}`;
+    const maxFloor = activeSession.messages.reduce(
+      (max, m) => Math.max(max, m.floorNumber || 0),
+      0
+    );
+
+    const initialMsg: ChatMessage = {
+      id: tempMsgId,
+      role: 'assistant',
+      content: '正在启动角色关系分析 Agent 进行深层心理学研判...',
+      timestamp: Date.now(),
+      floorNumber: maxFloor + 1,
+      timelineId: activeSession.activeTimelineId,
+      codeTag: '分析',
+      descriptionTag: '角色心理博弈',
+      isAnalysis: true,
+      analysisVisibility: 'visible',
+      analysisBranchCode: branchCode,
+      versions: [
+        {
+          content: '正在启动角色关系分析 Agent 进行深层心理学研判...',
+          timestamp: Date.now(),
+          model: activeSession.model || activeProvider.defaultModel,
+          providerName: activeProvider.name,
+        },
+      ],
+      currentVersionIndex: 0,
+    };
+
+    updateCurrentSession((prev) => ({
+      ...prev,
+      messages: [...prev.messages, initialMsg],
+    }));
+
+    try {
+      const report = await analyzeRoleRelationships({
+        provider: activeProvider,
+        model: activeSession.model || activeProvider.defaultModel,
+        contextText: contextSnippets || '暂无详细历史记录。',
+        currentBranchCode: branchCode,
+        currentBranchName: branchName,
+      });
+
+      updateCurrentSession((prev) => ({
+        ...prev,
+        messages: prev.messages.map((m) => {
+          if (m.id === tempMsgId) {
+            return {
+              ...m,
+              content: report,
+              versions: [
+                {
+                  content: report,
+                  timestamp: Date.now(),
+                  model: activeSession.model || activeProvider.defaultModel,
+                  providerName: activeProvider.name,
+                },
+              ],
+            };
+          }
+          return m;
+        }),
+      }));
+    } catch (err: any) {
+      updateCurrentSession((prev) => ({
+        ...prev,
+        messages: prev.messages.map((m) => {
+          if (m.id === tempMsgId) {
+            const failText = `[分析 Agent 调用失败]: ${err.message || '网络连接超时'}`;
+            return {
+              ...m,
+              content: failText,
+              versions: [{ content: failText, timestamp: Date.now() }],
+            };
+          }
+          return m;
+        }),
+      }));
+    } finally {
+      setIsStreaming(false);
+    }
+  };
+
+  // 2.4 窗口内全文搜索直达
+  const handleJumpToMessage = (messageId: string) => {
+    setIsSearchModalOpen(false);
+    setTimeout(() => {
+      const el = document.getElementById(`msg-${messageId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.classList.add('ring-2', 'ring-indigo-500', 'rounded-2xl', 'transition-all');
+        setTimeout(() => {
+          el.classList.remove('ring-2', 'ring-indigo-500');
+        }, 2500);
+      }
+    }, 100);
+  };
+
+  // 世界观文档管理
+  const handleSaveWorldDocument = (doc: WorldDocument) => {
+    setWorldDocuments((prev) => {
+      const idx = prev.findIndex((d) => d.id === doc.id);
+      let next: WorldDocument[];
+      if (idx >= 0) {
+        next = [...prev];
+        next[idx] = doc;
+      } else {
+        next = [doc, ...prev];
+      }
+      Storage.setWorldDocuments(next);
+      return next;
+    });
+  };
+
+  const handleDeleteWorldDocument = (docId: string) => {
+    setWorldDocuments((prev) => {
+      const next = prev.filter((d) => d.id !== docId);
+      Storage.setWorldDocuments(next);
+      return next;
+    });
+  };
+
+  const handleInjectDocAsPrompt = (content: string, target: 'fixed' | 'common') => {
+    if (target === 'fixed') {
+      updateCurrentSession((prev) => ({
+        ...prev,
+        systemPromptFixed: prev.systemPromptFixed ? `${prev.systemPromptFixed}\n\n${content}` : content,
+        systemPromptOverride: prev.systemPromptFixed ? `${prev.systemPromptFixed}\n\n${content}` : content,
+      }));
+    } else {
+      updateCurrentSession((prev) => ({
+        ...prev,
+        systemPromptInjectedCommon: prev.systemPromptInjectedCommon ? `${prev.systemPromptInjectedCommon}\n\n${content}` : content,
+        isCommonPushed: true,
+      }));
+    }
+    alert(`设定文档内容已成功注入至【${target === 'fixed' ? '本身的提示词' : '注入的通用'}】区域！`);
+  };
+
+  // 3.1 双框提示词区域逻辑
+  const handleSaveDualBoxPrompt = (fixedPrompt: string, commonPrompt: string, isCommonPushed: boolean) => {
+    updateCurrentSession((prev) => ({
+      ...prev,
+      systemPromptFixed: fixedPrompt,
+      systemPromptInjectedCommon: commonPrompt,
+      systemPromptOverride: fixedPrompt,
+      isCommonPushed,
+    }));
+  };
+
+  const handlePushCommonMessages = () => {
+    const commonMessages = (activeSession.messages || []).filter(
+      (m) => m.isCommon || m.timelineId === 'timeline-main' || m.codeTag === '通用'
+    );
+    const commonSnippets = commonMessages.map((m) => {
+      const floorStr = m.floorNumber ? `[来自 #${m.floorNumber}]` : '';
+      const role = m.role === 'user' ? '用户设定' : '基础世界观';
+      const content =
+        m.role === 'assistant'
+          ? (m.versions[m.currentVersionIndex] || m.versions[0])?.content || m.content
+          : m.content;
+      return `${floorStr} ${role}：${content.trim()}`;
+    });
+
+    const generated = commonSnippets.join('\n\n');
+    updateCurrentSession((prev) => ({
+      ...prev,
+      systemPromptInjectedCommon: generated,
+      isCommonPushed: true,
+    }));
+  };
+
+  const handleRevertCommonMessages = () => {
+    updateCurrentSession((prev) => ({
+      ...prev,
+      systemPromptInjectedCommon: '',
+      isCommonPushed: false,
+    }));
   };
 
   return (
@@ -947,6 +1327,10 @@ export default function App() {
         onOpenThemeModal={() => setIsThemeModalOpen(true)}
         onOpenMcpModal={() => setIsMcpModalOpen(true)}
         onOpenSkillModal={() => setIsSkillModalOpen(true)}
+        onOpenSearchModal={() => setIsSearchModalOpen(true)}
+        onOpenDocumentModal={() => setIsDocumentModalOpen(true)}
+        onOpenDualBoxPromptModal={() => setIsDualBoxPromptModalOpen(true)}
+        onTriggerRoleAnalysis={handleTriggerRoleAnalysis}
         onRenameSession={handleRenameSession}
         onClearSession={handleClearSession}
         onDeleteSession={handleDeleteSession}
@@ -982,6 +1366,9 @@ export default function App() {
           onDeleteMessage={handleDeleteMessage}
           onChangeAiContextVisibility={handleChangeAiContextVisibility}
           onChangeUiRenderLimit={handleChangeUiRenderLimit}
+          onToggleCommon={handleToggleCommon}
+          onToggleAnalysisVisibility={handleToggleAnalysisVisibility}
+          onSaveAnalysisToDoc={handleSaveAnalysisToDoc}
         />
 
         {/* Mobile Chat Input Area */}
@@ -1004,7 +1391,21 @@ export default function App() {
           onOpenMcpModal={() => setIsMcpModalOpen(true)}
           onOpenSkillModal={() => setIsSkillModalOpen(true)}
           inputDraft={inputDraft}
-          setInputDraft={setInputDraft}
+          setInputDraft={handleDraftChange}
+          timelines={activeSession.timelines || []}
+          activeTimelineId={activeSession.activeTimelineId}
+          onSelectTimeline={(tid) => updateCurrentSession((prev) => ({ ...prev, activeTimelineId: tid }))}
+          tagDisplayMode={activeSession.tagDisplayMode || 'desc'}
+          onToggleTagDisplayMode={() =>
+            updateCurrentSession((prev) => ({
+              ...prev,
+              tagDisplayMode: prev.tagDisplayMode === 'code' ? 'desc' : 'code',
+            }))
+          }
+          lastUserMessageTimelineId={lastUserMessageTimelineId}
+          onTriggerRoleAnalysis={handleTriggerRoleAnalysis}
+          onOpenDualBoxPromptModal={() => setIsDualBoxPromptModalOpen(true)}
+          onOpenSearchModal={() => setIsSearchModalOpen(true)}
         />
       </main>
 
@@ -1152,12 +1553,19 @@ export default function App() {
         onSelectTheme={setThemePalette}
       />
 
-      {/* Message Display & Metadata Settings Modal */}
+      {/* Message Display, WebDAV & Metadata Settings Modal */}
       <SettingsModal
         isOpen={isDisplaySettingsModalOpen}
         onClose={() => setIsDisplaySettingsModalOpen(false)}
         displaySettings={displaySettings}
         onChangeDisplaySettings={setDisplaySettings}
+        webdavConfig={webdavConfig}
+        onChangeWebDavConfig={(cfg) => {
+          setWebdavConfig(cfg);
+          Storage.setWebDavConfig(cfg);
+        }}
+        onExportJson={handleExportData}
+        onImportJson={handleImportJson}
         theme={theme}
         sessionTotalTokens={sessionTotalTokens}
       />
@@ -1171,6 +1579,38 @@ export default function App() {
         onUpdateSession={updateCurrentSession}
         filterByActiveTimeline={filterByActiveTimeline}
         onToggleFilterByActiveTimeline={() => setFilterByActiveTimeline((prev) => !prev)}
+      />
+
+      {/* 3.1 双框提示词区域 Modal */}
+      <PromptDualBoxModal
+        isOpen={isDualBoxPromptModalOpen}
+        onClose={() => setIsDualBoxPromptModalOpen(false)}
+        session={activeSession}
+        theme={theme}
+        onSavePrompt={handleSaveDualBoxPrompt}
+        onPushCommonMessages={handlePushCommonMessages}
+        onRevertCommonMessages={handleRevertCommonMessages}
+      />
+
+      {/* 2.4 窗口内全文搜索 Modal */}
+      <SearchModal
+        isOpen={isSearchModalOpen}
+        onClose={() => setIsSearchModalOpen(false)}
+        messages={activeSession.messages}
+        timelines={activeSession.timelines || []}
+        theme={theme}
+        onJumpToMessage={handleJumpToMessage}
+      />
+
+      {/* 世界观设定与文档库 Modal */}
+      <DocumentModal
+        isOpen={isDocumentModalOpen}
+        onClose={() => setIsDocumentModalOpen(false)}
+        documents={worldDocuments}
+        onSaveDocument={handleSaveWorldDocument}
+        onDeleteDocument={handleDeleteWorldDocument}
+        onInjectAsPrompt={handleInjectDocAsPrompt}
+        theme={theme}
       />
     </div>
   );

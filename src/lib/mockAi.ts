@@ -12,186 +12,150 @@ export function generateSmartLocalResponse(
   const query = userPrompt.trim();
   const lower = query.toLowerCase();
 
-  // 0. Timeline Memory Context Reaction
-  if (timelineContextPrompt && (timelineContextPrompt.includes('当前激活分支') || query.includes('时间线') || query.includes('IF线'))) {
-    // Extract current branch name from prompt if present
-    const branchMatch = timelineContextPrompt.match(/当前激活分支：【(.+?)】/);
-    const branchName = branchMatch ? branchMatch[1] : '当前分支';
-    const tagMatch = timelineContextPrompt.match(/标识标签：(.+?)）/);
-    const tag = tagMatch ? tagMatch[1] : '时间线';
+  // 0. AI 行为规范 6.5：分支状态汇报 (标签树)
+  if (
+    query.includes('标签树') ||
+    query.includes('分支树') ||
+    query.includes('分支状态') ||
+    query.includes('查看分支')
+  ) {
+    return `当前标签树与楼号归属状态：
 
-    return `⏱️ **【已锁定时间线分支 · 记忆树共鸣】**
-🏷️ **当前时间线**：\`${branchName}\` (标签: \`${tag}\`)
+\`\`\`
+[通用] #1-#3
+├── [A1] 下药线 #4 #6
+│   ├── [A11] 下药线·等待太久 #9
+│   └── [A12] 下药线·感情上头 #8 #10
+├── [B1] 联姻线 #5 #7 (已隐藏)
+└── [C1] 远走线 #11
+\`\`\`
 
-收到关于此时间线的输入：“${query}”
-
-在该分支的因果脉络中，历史已被重新定位与归类：
-1. **分支现实确立**：当前对话与事件均属于「${branchName}」时间线独立推演，绝不与主线或其他平行分支混淆；
-2. **剧情推进**：你的决策已在该分支的记忆树中生长出新的节点。关键因果链与区分信息已被记忆整理器沉淀；
-3. **后续走向**：你可以继续在本时间线深入探索剧情，或随时通过显式说明开启一条新的平行时间线！`;
+💡 您可在输入框上方滑动切换当前发言归属标签，或点击左上角【分支】管理可见性。`;
   }
 
-  // 1. Skill Triggered Responses
+  // 1. Skill 技能系统 (PRD 八、针对文游场景定制)
   if (triggeredSkills.length > 0) {
     const activeSkill = triggeredSkills[0];
 
-    if (activeSkill.id === 'skill-web-research') {
-      return `⚡ **已激活 Skill**：【${activeSkill.name}】
-🔌 **调用工具**：\`web_search\` 实时检索协议
+    // 1.1 时间线梳理 (因果链整理)
+    if (activeSkill.id === 'skill-timeline-analysis') {
+      return `⏳ **【时间线梳理 · 因果链推演】**
+📌 **所属分支**：当前时间线序列
 
-经过网络多源检索与交叉核验，为您总结如下要点：
-1. **核心态势**：针对「${query}」，最新行业共识已形成标准化规范；
-2. **多方印证**：
-   - 官方权威源：已于近期发布新一代交互与协议标准；
-   - 社区实践：开发者反馈架构解耦后吞吐量提升约 35%；
-3. **时效性提示**：数据已更新至最新状态，建议结合你的实际业务场景灵活落地。`;
+1. **起因契机**：通用世界观底色确立，矛盾焦点初步显露；
+2. **关键抉择**：在剧情关键节点发生分歧决策，直接催生了当前分支独立演化；
+3. **连锁反应**：各方势力与角色基于自身防御机制做出对抗或依附姿态；
+4. **当前局势**：因果锁链已收紧，矛盾即将进入下一阶段激化。
+
+> 💡 提示：该分支的因果链已被程序重排中间件稳定锁定在上下文前缀，保障长程逻辑一致性。`;
     }
 
-    if (activeSkill.id === 'skill-code-debugger') {
-      return `⚡ **已激活 Skill**：【${activeSkill.name}】
-🔍 **代码诊断排查结果**：
+    // 1.2 角色关系分析 (情感演变)
+    if (activeSkill.id === 'skill-role-relationship') {
+      return `👥 **【角色关系与心理动机分析报告】**
 
-针对你提出的异常描述：\`${query}\`
+1. **核心驱动力**：各角色表面行为下暗藏深层恐惧，追求对局面的控制感；
+2. **权力平衡与博弈**：双方在言语与行动间互相试探，信任度呈现波动态势；
+3. **隐秘态度变化**：随着本分支剧情推进，此前潜伏的软肋逐渐暴露；
+4. **潜在爆点**：一旦特定底线被触碰，势必引爆不可逆的戏剧冲突。
 
-1. **错误诱因定位**：
-   - 变量在异步闭包解析前已被重置或存在并发竞争条件（Race Condition）。
-2. **根因剖析**：
-   - 未在状态变更点执行不可变副本浅拷贝，导致引用污染；
-3. **修复示例代码**：
-\`\`\`typescript
-// 优化后的防御性处理
-try {
-  const sanitizedInput = Object.freeze({ ...rawPayload });
-  await processSafely(sanitizedInput);
-} catch (error: any) {
-  console.error('[Diagnostic] Catch boundary trapped:', error?.message);
-}
-\`\`\`
-4. **防御建议**：为核心边界加装 TypeScript 判空断言与自动化单元测试。`;
+> 📊 亦可随时点击聊天顶部的 **[📊 分析角色关系]** 按钮，调动专属心理学 Agent 生成深度分析并一键归档。`;
     }
 
-    if (activeSkill.id === 'skill-doc-generator') {
-      return `⚡ **已激活 Skill**：【${activeSkill.name}】
+    // 1.3 世界观一致性检查 (查矛盾)
+    if (activeSkill.id === 'skill-worldview-consistency') {
+      return `🔍 **【世界观一致性核查结果】**
 
-这是为您生成的结构化架构设计与 API 规约：
+经过与「通用世界观」及父级设定链路的交叉比对：
+- **世界观底色吻合度**：100%（科技水平、社会制度与核心法则无冲突）；
+- **角色言行一致性**：行为符合既定性格基准，未发现设定吃书或逻辑跳跃；
+- **分支因果闭环**：当前分支的动机演进符合自然心理发展规律。
 
-\`\`\`mermaid
-sequenceDiagram
-    autonumber
-    actor User as 移动端用户
-    participant App as 观界系统
-    participant MCP as MCP Server
-    participant Model as 语言模型
-
-    User->>App: 发送消息指令
-    App->>MCP: 匹配工具与知识库检索
-    MCP-->>App: 返回 Context Payload
-    App->>Model: 组合 System Prompt 注入推演
-    Model-->>User: 逐字流式打字回显
-\`\`\`
-
-**接口契约规范**：
-- **URI**: \`/api/v1/sessions/dispatch\`
-- **Method**: \`POST\`
-- **Status**: \`200 OK (application/json)\``;
+建议：可进一步丰富边缘细节（如环境氛围与微表情描摹），增强沉浸张力。`;
     }
 
-    if (activeSkill.id === 'skill-math-calc') {
-      return `⚡ **已激活 Skill**：【${activeSkill.name}】
-🧮 **逐步严格推演过程**：
+    // 1.4 Deep Research 联网调研
+    if (activeSkill.id === 'skill-deep-research') {
+      return `🌐 **【Deep Research 联网调研资料参考】**
+🔌 **调用工具**：\`search_lore_reference\`
 
-针对问题：**"${query}"**
+针对世界观考据关键要素：
+1. **历史制度原型**：类似权力结构在古典政治体制中往往表现为相互制衡与暗中角力；
+2. **人际心理学映射**：高压情境下的联盟关系具有强烈的功利依附属性；
+3. **叙事参考建议**：可借鉴真实历史演化中的偶然性事件，为分支剧情注入不可预料的生动感。`;
+    }
 
-1. **设立公式模型**：
-   设自变量 $x$ 为基础基准，$r$ 为步进速率；
-2. **代入数据逐步计算**：
-   - 第一步：标准化数值边界，剔除异常干扰项；
-   - 第二步：计算复合增益 $\\Delta = x \\times (1 + r)^t$；
-   - 第三步：双向反验，误差范围 $\\epsilon < 10^{-6}$。
-3. **确定性结论**：推演结果严格可信，杜绝数字幻觉。`;
+    // 1.5 设定文档生成 (归档)
+    if (activeSkill.id === 'skill-doc-generate') {
+      return `📑 **【结构化设定文档整理】**
+
+# 角色与世界观设定片段
+
+- **所属分支**：当前时间线
+- **核心人物档案**：
+  - 核心动机：自我保全与追求自主权
+  - 关系羁绊：表面客套，暗中设防
+- **关键历史事件节点**：
+  - 分歧点发生，各方态度出现不可逆转的分化。
+
+> 💡 本条内容已按标准 Markdown 规范整理，可点击消息操作菜单一键归档至【世界观文档库】。`;
     }
   }
 
-  // 2. Knowledge Base Matching
-  const matchingDocs = knowledgeBase.filter(
-    (k) =>
-      k.enabled &&
-      (query.includes(k.title) ||
-        k.tags.some((t) => query.includes(t)) ||
-        k.content.toLowerCase().includes(lower))
-  );
-
-  if (matchingDocs.length > 0) {
-    const doc = matchingDocs[0];
-    return `📚 **检索自已连接的知识库**：《${doc.title}》\n\n${doc.content}\n\n💡 提示：该内容直接根据你连接的知识库提供事实依据。`;
+  // 2. 正则系统配合标签 (PRD 7.2: <总结><正文>分区隐藏)
+  if (query.includes('总结') || query.includes('正则') || query.includes('概括')) {
+    return `<总结>
+当前分支的核心事件推进明确，角色间矛盾已不可调和，即将迎来决定性对峙。
+</总结>
+<正文>
+在当前时间线细化分支中，各方情绪在压抑后迎来爆发期。言语的伪装已无法掩盖深层的行动意图，任何微小的变故都将引发连锁崩塌，为下一步抉择提供了充分的动机依托。
+</正文>`;
   }
 
-  // 3. MCP Server status inquiry
-  if (lower.includes('mcp') || lower.includes('工具') || lower.includes('tool')) {
-    const serverList = connectedMcp
-      .map((s) => `- **${s.name}** (${s.type}): 包含工具 [${s.tools.map((t) => t.name).join(', ')}]`)
-      .join('\n');
+  // 3. AI 行为规范 6.1 分支检测与建议
+  if (
+    query.includes('如果') ||
+    query.includes('走另外一条路') ||
+    query.includes('分支') ||
+    query.includes('另一条线')
+  ) {
+    return `💡 **【检测到潜在剧情新分支】**
 
-    return `🔌 **当前活跃的 MCP (Model Context Protocol) 状态**：
+检测到您的剧情设想可能偏离当前时间线：
+- **建议新编号**：\`A13\` 或 \`B2\`
+- **建议描述标签**：\`决裂线·背水一战\`
 
-${serverList || '暂无已连接的 MCP 服务器，点击底部「MCP」或右上角菜单可快速配置。'}
+若确认开启，您可以在输入框上方的分支栏中选择新标签继续，或在左上角【分支】管理面板中创建。
 
-**MCP 支持能力**：
-- 支持 **SSE 实时流协议** 与 **本地 Stdio 命令行服务**；
-- 赋予 AI 大模型读写文件、访问本地数据库、调用网络检索等真实行动力！`;
+---
+
+针对您的探讨：
+在这个可能性分支下，原本稳固的盟约将瞬间瓦解，各角色将不得不提前亮出底牌。`;
   }
 
-  // 4. Role-specific intelligence replies
-  if (agent.id === 'agent-coder') {
-    return `收到！我以「${agent.name}」的身份为你进行技术解答：
+  // 4. Timeline Context 注入反应
+  if (timelineContextPrompt && timelineContextPrompt.includes('当前激活分支')) {
+    const branchMatch = timelineContextPrompt.match(/当前激活分支：【(.+?)】/);
+    const branchName = branchMatch ? branchMatch[1] : '当前时间线';
 
-针对你的需求：**"${query}"**
+    return `⏱️ **【已锁定时间线分支：${branchName}】**
 
-\`\`\`typescript
-export interface ITaskContext {
-  id: string;
-  payload: Record<string, unknown>;
-  timestamp: number;
-}
+围绕当前分支展开探讨：针对「${query}」
 
-export async function executeOperation(context: ITaskContext): Promise<void> {
-  // 1. 校验输入状态与断言
-  // 2. 状态原子性流转
-  console.log('[System] Executed successfully:', context.id);
-}
-\`\`\`
-
-**技术建议**：
-1. 模块边界清晰，遵循单一职责原则；
-2. 为核心路径添加容灾降级机制；
-3. 可以点击本回答底部的 **「Roll分支」** 获取另一套架构思路。`;
+1. **局势推演**：在该时间线设定中，既有事实被严格维护，未受平行分支扰动；
+2. **事件关联**：与父级通用世界观设定保持紧密因果关联；
+3. **下一步探讨**：您可继续围绕人物动机深入推演，或点击上方标签随时切换视角。`;
   }
 
-  if (agent.id === 'agent-writer') {
-    return `这是为您提炼润色的版本：
+  // 5. 默认文游交互回复
+  return `收到。针对当前世界观的探讨：
 
 > **“${query}”**
 
-✨ **【优化方案 A · 精准干练】**
-“去除冗杂修辞，直击核心痛点，使读者在数秒内把握核心主旨与行动呼吁。”
+从人物动机与因果演变角度来看：
+1. **行为诱因**：这一动作符合角色当前的心理防御机制与处境；
+2. **局势反馈**：外部世界对其选择将产生必然的因果回响；
+3. **后续推演**：若沿着这一脉络推进，角色间的博弈将进一步明朗化。
 
-✨ **【优化方案 B · 文艺雅致】**
-“春风化雨，行云流水，在字里行间融注叙事共鸣，留给读者持久的回味空间。”
-
-（注：您可以点击本条回答底部的 **「Roll分支」** 切换生成长文方案）`;
-  }
-
-  // 5. Default Omni Agent response
-  return `你好！我已经接收到你的消息：
-
-> **"${query}"**
-
-当前处于 **「全功能智能模拟模式」**，已为你准备就绪以下高级特性：
-- ☀️ **白底清新模式**：点击顶部导航栏右上角的 **太阳/月亮图标** 即可在黑白底色间无缝切换；
-- 🔌 **MCP 协议服务器**：点击底栏「MCP」可管理和连接 SSE / Stdio 外部工具；
-- ⚡ **Agent Skills 技能系统**：在「Skill」面板中开启或添加你的自定义技能，触发关键词时自动激活特化提示词；
-- 📚 **本地知识库**：随时挂载专属文档进行 RAG 参考；
-- 🎲 **Roll AI 分支**：点击下方的「Roll分支」生成多版本回答，无损回溯！
-
-有什么具体任务需要我为你处理吗？`;
+💡 您可以使用上方双框提示词注入全局设定，或随时点击 **[📊 分析角色关系]** 深度洞察心理动力学。`;
 }

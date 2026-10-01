@@ -70,10 +70,10 @@ export const PromptModal: React.FC<PromptModalProps> = ({
     setEditingPrompt(p);
     setIsCreating(false);
     setTitle(p.title);
-    setDescription(p.description);
+    setDescription(p.description || '');
     setContent(p.content);
     setCategory(p.category);
-    setTagsStr(p.tags.join(', '));
+    setTagsStr((p.tags || []).join(', '));
   };
 
   const handleSaveForm = (e: React.FormEvent) => {
@@ -105,9 +105,9 @@ export const PromptModal: React.FC<PromptModalProps> = ({
     const matchesSearch =
       !q ||
       p.title.toLowerCase().includes(q) ||
-      p.description.toLowerCase().includes(q) ||
+      (p.description || '').toLowerCase().includes(q) ||
       p.content.toLowerCase().includes(q) ||
-      p.tags.some((t) => t.toLowerCase().includes(q));
+      (p.tags || []).some((t) => t.toLowerCase().includes(q));
     return matchesCat && matchesSearch;
   });
 

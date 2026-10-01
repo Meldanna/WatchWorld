@@ -44,6 +44,10 @@ interface HeaderProps {
   onOpenThemeModal: () => void;
   onOpenMcpModal: () => void;
   onOpenSkillModal: () => void;
+  onOpenSearchModal?: () => void;
+  onOpenDocumentModal?: () => void;
+  onOpenDualBoxPromptModal?: () => void;
+  onTriggerRoleAnalysis?: () => void;
   onRenameSession: (sessionId: string, newTitle: string) => void;
   onClearSession: (sessionId: string) => void;
   onDeleteSession: (sessionId: string) => void;
@@ -71,6 +75,10 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenThemeModal,
   onOpenMcpModal,
   onOpenSkillModal,
+  onOpenSearchModal,
+  onOpenDocumentModal,
+  onOpenDualBoxPromptModal,
+  onTriggerRoleAnalysis,
   onRenameSession,
   onClearSession,
   onDeleteSession,
@@ -173,6 +181,53 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Right Controls */}
       <div className="flex items-center gap-1.5 shrink-0 ml-2">
+        {/* Search in Current Window Button */}
+        {onOpenSearchModal && (
+          <button
+            onClick={onOpenSearchModal}
+            className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-300 flex items-center justify-center border border-slate-300 dark:border-slate-700/50 active:scale-95 transition-all"
+            title="窗口内全文搜索（带楼号与标签直达）"
+          >
+            <Search size={15} />
+          </button>
+        )}
+
+        {/* World Documents Button */}
+        {onOpenDocumentModal && (
+          <button
+            onClick={onOpenDocumentModal}
+            className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-300 flex items-center justify-center border border-slate-300 dark:border-slate-700/50 active:scale-95 transition-all"
+            title="世界观文档库（设定、人物卡、时间线梳理）"
+          >
+            <BookOpen size={15} className="text-emerald-500" />
+          </button>
+        )}
+
+        {/* Dual-Box Prompt Area Button */}
+        {onOpenDualBoxPromptModal && (
+          <button
+            onClick={onOpenDualBoxPromptModal}
+            className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-300 flex items-center justify-center border border-slate-300 dark:border-slate-700/50 active:scale-95 transition-all"
+            title="双框提示词区域与推入通用（API缓存优化）"
+          >
+            <Layers size={15} className="text-indigo-500" />
+          </button>
+        )}
+
+        {/* Timeline Branch Quick Button */}
+        <button
+          onClick={onOpenTimelineModal}
+          className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold transition-all border ${
+            currentSession.timelineMemoryEnabled
+              ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/30'
+              : 'bg-slate-100 dark:bg-slate-800/80 text-slate-500 border-slate-300 dark:border-slate-700/50'
+          }`}
+          title={`时间线记忆树: ${activeTimeline ? activeTimeline.name : '通用世界观'}`}
+        >
+          <GitBranch size={12} className={currentSession.timelineMemoryEnabled ? 'text-indigo-500' : 'text-slate-400'} />
+          <span className="max-w-[70px] truncate">{activeTimelineTag}</span>
+        </button>
+
         {/* Light / Dark Mode Toggle Button */}
         <button
           onClick={onToggleUiMode}
@@ -186,18 +241,6 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </button>
 
-        {/* Quick Theme Switch button */}
-        <button
-          onClick={onOpenThemeModal}
-          className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700/80 text-slate-600 dark:text-slate-300 flex items-center justify-center border border-slate-300 dark:border-slate-700/50 active:scale-95 transition-all"
-          title="切换界面主题颜色"
-        >
-          <div
-            className="w-3.5 h-3.5 rounded-full"
-            style={{ backgroundColor: theme.primaryHex }}
-          />
-        </button>
-
         {/* Quick New Session Button */}
         <button
           onClick={onNewSession}
@@ -205,20 +248,6 @@ export const Header: React.FC<HeaderProps> = ({
           title="新建窗口会话"
         >
           <Plus size={16} />
-        </button>
-
-        {/* Timeline Branch Quick Button */}
-        <button
-          onClick={onOpenTimelineModal}
-          className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold transition-all border ${
-            currentSession.timelineMemoryEnabled
-              ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/30'
-              : 'bg-slate-100 dark:bg-slate-800/80 text-slate-500 border-slate-300 dark:border-slate-700/50'
-          }`}
-          title={`时间线记忆树: ${activeTimeline ? activeTimeline.name : '主线'}`}
-        >
-          <GitBranch size={12} className={currentSession.timelineMemoryEnabled ? 'text-indigo-500' : 'text-slate-400'} />
-          <span className="max-w-[70px] truncate">{activeTimelineTag}</span>
         </button>
 
         {/* API Provider Status Indicator */}
