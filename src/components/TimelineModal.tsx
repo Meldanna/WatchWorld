@@ -91,8 +91,9 @@ export const TimelineModal: React.FC<TimelineModalProps> = ({
   };
 
   const handleStartCreate = (parentId?: string) => {
-    const parent = parentId || activeTimelineId || '';
-    const autoCode = allocateTimelineCodeTag(parent, timelines);
+    const parentKey = parentId || activeTimelineId || '';
+    const parentBranch = timelines.find((t) => t.id === parentKey);
+    const autoCode = allocateTimelineCodeTag(timelines, parentBranch);
     setEditingTimelineId(null);
     setFormCodeTag(autoCode);
     setFormDescriptionTag('');
@@ -101,7 +102,7 @@ export const TimelineModal: React.FC<TimelineModalProps> = ({
     const usedColors = new Set(timelines.map((t) => t.color));
     const nextColor = TIMELINE_COLORS.find((c) => !usedColors.has(c.id)) || TIMELINE_COLORS[0];
     setFormColor(nextColor.id);
-    setFormParentId(parent);
+    setFormParentId(parentKey);
     setFormDescription('');
     setFormPlotSummary('自该分化节点起展开新剧情。');
     setActiveTab('create');

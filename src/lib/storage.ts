@@ -94,7 +94,20 @@ export const Storage = {
   },
 
   getAgents(): Agent[] {
-    return safeGet<Agent[]>(STORAGE_KEYS.AGENTS, DEFAULT_AGENTS);
+    const raw = safeGet<Agent[]>(STORAGE_KEYS.AGENTS, DEFAULT_AGENTS);
+    const list = Array.isArray(raw) ? raw : DEFAULT_AGENTS;
+    // 兼容旧版本 localStorage / 导入的 JSON：缺 tags 的条目在这里补齐，
+    // 避免依赖它的组件（如 AgentModal）在渲染时抛错导致整页白屏。
+    const normalized = list
+      .filter((a) => a && typeof a.id === 'string')
+      .map((a) => ({ ...a, tags: Array.isArray(a.tags) ? a.tags : [] }));
+
+    // 补齐后新增的内置顾问：老用户 localStorage 里不存在这些条目
+    const existingIds = new Set(normalized.map((a) => a.id));
+    const missingBuiltins = DEFAULT_AGENTS.filter((a) => !existingIds.has(a.id));
+
+    const merged = [...missingBuiltins, ...normalized];
+    return merged.length > 0 ? merged : DEFAULT_AGENTS;
   },
 
   setAgents(agents: Agent[]) {
@@ -236,8 +249,8 @@ export const Storage = {
     }
   },
 
-  exportAllData(): string {
-    const dump = {
+  exportAllData(opts?: { redactSecrets?: boolean }): string {
+    let dump: Record<string, unknown> = {
       version: 5,
       exportTime: Date.now(),
       providers: this.getProviders(),
@@ -255,6 +268,18 @@ export const Storage = {
       worldDocuments: this.getWorldDocuments(),
       sessions: this.getSessions(),
     };
+
+    if (opts?.redactSecrets) {
+      // 远端备份（坚果云等）用：不带 API 密钥与 WebDAV 密码。
+      // 换设备恢复后须在设置里重新填入。
+      dump.providers = (dump.providers as ApiProviderConfig[]).map((p) => ({
+        ...p,
+        apiKey: '',
+      }));
+      const wd = dump.webdavConfig as WebDavConfig;
+      if (wd) wd.password = '';
+    }
+
     return JSON.stringify(dump, null, 2);
   },
 

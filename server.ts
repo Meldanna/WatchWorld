@@ -10,9 +10,22 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 app.use(express.json({ limit: '10mb' }));
+
+// 安全：/api/* 默认只监听 127.0.0.1；公网暴露前必须加 ACCESS_TOKEN。
+//   设   HOST=0.0.0.0   才会监听全部网卡（默认不变，不破坏向后兼容）。
+//   如   ACCESS_TOKEN=xxx  则所有 /api/* 都要求 Authorization: Bearer xxx。
+const HOST = process.env.HOST || '127.0.0.1';
+const ACCESS_TOKEN = process.env.ACCESS_TOKEN?.trim();
+app.use('/api', (_req: Request, res: Response, next: Function) => {
+  if (!ACCESS_TOKEN) return next();
+  // 校验 Bearer token，误伤其它路径
+  const auth = _req.headers.authorization || '';
+  if (auth === `Bearer ${ACCESS_TOKEN}`) return next();
+  return res.status(401).json({ error: 'unauthorized' });
+});
 
 // Health / test route
 app.get('/api/health', (req: Request, res: Response) => {
@@ -131,11 +144,31 @@ app.post('/api/chat', async (req: Request, res: Response) => {
       model,
       messages,
       systemInstruction,
-      temperature = 0.7,
-      maxTokens = 2048,
+      temperature,
+      topP,
+      topK,
+      frequencyPenalty,
+      presencePenalty,
+      maxTokens,
       stream = false,
       customHeaders,
     } = req.body;
+
+    // 数值解析：保留 0 这类合法边界值。
+    // 原来写作 `Number(x) || 默认`，温度设 0（追求确定性输出）会被误判成未设置而回退到 0.7。
+    const num = (v: unknown, fallback: number): number => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : fallback;
+    };
+
+    // 把 dataURL 拆成 mime + base64，供各家上游的多模态格式使用
+    const splitDataUrl = (dataUrl: string): { mime: string; data: string } | null => {
+      const m = /^data:([^;,]+);base64,(.*)$/s.exec(dataUrl || '');
+      if (!m) return null;
+      return { mime: m[1], data: m[2] };
+    };
+
+    const imagesOf = (m: any): any[] => (Array.isArray(m?.images) ? m.images : []);
 
     // 1. Google Gemini Handling (Server-side key or user provided key)
     if (provider === 'gemini' || (!provider && !baseUrl)) {
@@ -149,14 +182,26 @@ app.post('/api/chat', async (req: Request, res: Response) => {
       const ai = new GoogleGenAI({ apiKey: activeKey });
       const targetModel = model || 'gemini-2.0-flash';
 
-      const contents = (messages || []).map((msg: any) => ({
-        role: msg.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: msg.content || '' }]
-      }));
+      const contents = (messages || []).map((msg: any) => {
+        const parts: any[] = [];
+        if (msg.content) parts.push({ text: msg.content });
+        for (const img of imagesOf(msg)) {
+          const parsed = splitDataUrl(img.dataUrl);
+          if (parsed) parts.push({ inlineData: { mimeType: parsed.mime, data: parsed.data } });
+        }
+        return {
+          role: msg.role === 'assistant' ? 'model' : 'user',
+          parts: parts.length > 0 ? parts : [{ text: '' }],
+        };
+      });
 
       const config: any = {
-        temperature: Number(temperature) || 0.7,
+        temperature: num(temperature, 0.7),
       };
+
+      if (topP !== undefined) config.topP = num(topP, 0.95);
+      if (topK !== undefined) config.topK = num(topK, 40);
+      if (maxTokens !== undefined) config.maxOutputTokens = num(maxTokens, 2048);
 
       if (systemInstruction) {
         config.systemInstruction = systemInstruction;
@@ -216,19 +261,37 @@ app.post('/api/chat', async (req: Request, res: Response) => {
         formattedMessages.push({ role: 'system', content: systemInstruction });
       }
       for (const m of (messages || [])) {
-        formattedMessages.push({
-          role: m.role === 'assistant' ? 'assistant' : 'user',
-          content: m.content || '',
-        });
+        const imgs = imagesOf(m);
+        if (imgs.length > 0) {
+          // OpenAI 多模态：content 变成 text / image_url 的数组
+          const parts: any[] = [];
+          if (m.content) parts.push({ type: 'text', text: m.content });
+          for (const img of imgs) {
+            parts.push({ type: 'image_url', image_url: { url: img.dataUrl } });
+          }
+          formattedMessages.push({
+            role: m.role === 'assistant' ? 'assistant' : 'user',
+            content: parts,
+          });
+        } else {
+          formattedMessages.push({
+            role: m.role === 'assistant' ? 'assistant' : 'user',
+            content: m.content || '',
+          });
+        }
       }
 
       const payload: any = {
         model: model || 'gpt-4o-mini',
         messages: formattedMessages,
-        temperature: Number(temperature) || 0.7,
-        max_tokens: Number(maxTokens) || 2048,
+        temperature: num(temperature, 0.7),
+        max_tokens: num(maxTokens, 2048),
         stream: Boolean(stream),
       };
+
+      if (topP !== undefined) payload.top_p = num(topP, 0.95);
+      if (frequencyPenalty !== undefined) payload.frequency_penalty = num(frequencyPenalty, 0);
+      if (presencePenalty !== undefined) payload.presence_penalty = num(presencePenalty, 0);
 
       const upstreamRes = await fetch(endpoint, {
         method: 'POST',
@@ -279,17 +342,35 @@ app.post('/api/chat', async (req: Request, res: Response) => {
         ...(customHeaders || {}),
       };
 
-      const formattedMessages = (messages || []).map((m: any) => ({
-        role: m.role === 'assistant' ? 'assistant' : 'user',
-        content: m.content || '',
-      }));
+      const formattedMessages = (messages || []).map((m: any) => {
+        const role = m.role === 'assistant' ? 'assistant' : 'user';
+        const imgs = imagesOf(m);
+        if (imgs.length === 0) return { role, content: m.content || '' };
+
+        // Claude 多模态：base64 source 块
+        const blocks: any[] = [];
+        if (m.content) blocks.push({ type: 'text', text: m.content });
+        for (const img of imgs) {
+          const parsed = splitDataUrl(img.dataUrl);
+          if (!parsed) continue;
+          blocks.push({
+            type: 'image',
+            source: { type: 'base64', media_type: parsed.mime, data: parsed.data },
+          });
+        }
+        return { role, content: blocks.length > 0 ? blocks : m.content || '' };
+      });
 
       const payload: any = {
         model: model || 'claude-3-5-sonnet-20241022',
         messages: formattedMessages,
-        max_tokens: Number(maxTokens) || 2048,
-        temperature: Number(temperature) || 0.7,
+        max_tokens: num(maxTokens, 2048),
+        temperature: num(temperature, 0.7),
       };
+
+      // Claude 支持 top_p / top_k，但不接受 frequency_penalty / presence_penalty
+      if (topP !== undefined) payload.top_p = num(topP, 0.95);
+      if (topK !== undefined) payload.top_k = num(topK, 40);
 
       if (systemInstruction) {
         payload.system = systemInstruction;
@@ -446,8 +527,8 @@ async function startServer() {
     app.use(vite.middlewares);
   }
 
-  app.listen(PORT, () => {
-    console.log(`Server running at http://localhost:${PORT}`);
+  app.listen(PORT, HOST, () => {
+    console.log(`Server running at http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`);
   });
 }
 

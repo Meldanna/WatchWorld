@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { KnowledgeItem } from '../types';
 import { ThemeConfig } from '../lib/theme';
 import {
@@ -45,6 +45,7 @@ export const KnowledgeBaseModal: React.FC<KnowledgeBaseModalProps> = ({
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [tagsStr, setTagsStr] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
 
@@ -56,12 +57,39 @@ export const KnowledgeBaseModal: React.FC<KnowledgeBaseModalProps> = ({
     setTagsStr('文档');
   };
 
+  // 批量导入本地文本文件，每个文件成为一条知识库资料
+  const handleFilesUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (files.length === 0) return;
+
+    const now = Date.now();
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      try {
+        const text = await file.text();
+        if (!text.trim()) continue;
+        const ext = file.name.includes('.') ? file.name.split('.').pop() || '' : '';
+        onSaveKnowledgeItem({
+          id: `kb-file-${now}-${i}`,
+          title: file.name.replace(/\.[^.]+$/, '') || file.name,
+          content: text,
+          tags: ['文档', ext].filter(Boolean),
+          enabled: true,
+          updatedAt: now + i,
+        });
+      } catch (err) {
+        console.error(`读取文件失败: ${file.name}`, err);
+      }
+    }
+  };
+
   const startEdit = (item: KnowledgeItem) => {
     setEditingItem(item);
     setIsCreating(false);
     setTitle(item.title);
     setContent(item.content);
-    setTagsStr(item.tags.join(', '));
+    setTagsStr((item.tags ?? []).join(', '));
   };
 
   const handleSave = (e: React.FormEvent) => {
@@ -93,7 +121,7 @@ export const KnowledgeBaseModal: React.FC<KnowledgeBaseModalProps> = ({
       !q ||
       item.title.toLowerCase().includes(q) ||
       item.content.toLowerCase().includes(q) ||
-      item.tags.some((t) => t.toLowerCase().includes(q))
+      (item.tags ?? []).some((t) => t.toLowerCase().includes(q))
     );
   });
 
@@ -229,6 +257,23 @@ export const KnowledgeBaseModal: React.FC<KnowledgeBaseModalProps> = ({
                 />
               </div>
 
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept=".txt,.md,.json,.csv,.log,.yaml,.yml,text/*"
+                className="hidden"
+                onChange={handleFilesUpload}
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="px-3 py-1.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-100 text-xs font-medium flex items-center gap-1 shrink-0 shadow-sm"
+                title="从本地导入文本文件（可多选），每个文件成为一条资料"
+              >
+                <UploadCloud size={14} />
+                <span>导入文件</span>
+              </button>
+
               <button
                 onClick={startCreate}
                 className={`px-3 py-1.5 rounded-xl ${theme.primaryBg} ${theme.primaryHover} text-white text-xs font-medium flex items-center gap-1 shrink-0 shadow-sm`}
@@ -282,7 +327,7 @@ export const KnowledgeBaseModal: React.FC<KnowledgeBaseModalProps> = ({
                               )}
                             </div>
                             <div className="flex items-center gap-1 text-[10px] text-slate-400 mt-0.5">
-                              {item.tags.map((t) => (
+                              {(item.tags ?? []).map((t) => (
                                 <span key={t} className="bg-slate-800/80 px-1.5 py-0.5 rounded">
                                   #{t}
                                 </span>

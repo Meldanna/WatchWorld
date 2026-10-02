@@ -23,6 +23,13 @@ export interface ApiProviderConfig {
   enabled?: boolean;
   isSystemDefault?: boolean;
   customHeaders?: Record<string, string>; // 自定义请求头（适配不同中转站）
+  // 全局默认采样参数：仅当窗口与顾问都未指定时生效，可被窗口级参数覆盖
+  defaultTemperature?: number;
+  defaultTopP?: number;
+  defaultTopK?: number;
+  defaultFrequencyPenalty?: number;
+  defaultPresencePenalty?: number;
+  defaultMaxTokens?: number;
 }
 
 // Agent Configuration
@@ -97,6 +104,7 @@ export interface ChatMessage {
   isCommon?: boolean; // 是否标记为通用信息 (PRD 4.5)
   isAnalysis?: boolean; // 是否为心理动力学角色关系分析报告
   analysisVisibility?: 'visible' | 'hidden'; // 分析报告的可见性
+  imageIds?: string[]; // 附加图片的 id（图片本体存于 IndexedDB，这里只存引用）
   analysisBranchCode?: string; // 所属分析分支
 }
 
@@ -199,8 +207,10 @@ export interface WebDavConfig {
   url: string; // WebDAV 地址 (坚果云、Nextcloud、Alist、自建NAS等)
   username: string; // 用户名
   password?: string; // 应用密码
-  syncPath?: string; // 同步文件路径，默认 /guanjie_backup.json
+  syncPath?: string; // 兼容旧版全量备份文件路径，默认 /guanjie_backup.json
+  syncRootDir?: string; // 增量同步的根目录，默认 /guanjie/
   autoSync: boolean; // 数据变动时自动同步
+  includeApiConfig?: boolean; // 手动全量备份到 WebDAV 时，是否一并上传 API 密钥与 WebDAV 密码（默认否）
   lastSyncTime?: number;
   syncStatus?: 'idle' | 'syncing' | 'success' | 'error';
   lastError?: string;
@@ -224,6 +234,14 @@ export interface ChatSession {
   agentId: string;
   providerId?: string;
   model?: string;
+  // 窗口级 API 采样参数：仅覆盖本会话，不改变全局 Provider 配置。
+  // 未设置(undefined) 时回退到当前 Agent 的对应值。
+  temperature?: number;
+  topP?: number;
+  topK?: number;
+  frequencyPenalty?: number;
+  presencePenalty?: number;
+  maxTokens?: number;
   systemPromptOverride?: string;
   // 3.1 双框提示词区域
   systemPromptFixed?: string; // 用户手写的固定提示词（始终展开）
@@ -246,4 +264,25 @@ export interface ChatSession {
   createdAt: number;
   updatedAt: number;
   pinned?: boolean;
+  // 4.6 前文总结：按顺序推入系统提示词，不重复总结已处理过的楼层
+  summaryPrompt?: string; // 总结用的提示词（可配置，留空用默认）
+  summaryModel?: string; // 总结用的模型（留空跟随本窗口当前模型）
+  summaries?: SessionSummary[]; // 已生成的总结，按时间顺序
+  lastSummarizedFloor?: number; // 已总结到的最大楼号，用于避免重复总结
+  /**
+   * 图片是否留在后续上下文：
+   * 'once'（默认）= 只在发送它的那一轮带给模型，之后不再重复计费；
+   * 'history'    = 图片随消息保留在历史里，模型后续仍能看到。
+   */
+  imageContextMode?: 'once' | 'history';
+}
+
+/** 一条前文总结记录 */
+export interface SessionSummary {
+  id: string;
+  content: string;
+  fromFloor: number;
+  toFloor: number;
+  model?: string;
+  createdAt: number;
 }

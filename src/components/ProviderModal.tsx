@@ -57,6 +57,13 @@ export const ProviderModal: React.FC<ProviderModalProps> = ({
   const [modelsStr, setModelsStr] = useState('');
   const [defaultModel, setDefaultModel] = useState('');
   const [customHeadersStr, setCustomHeadersStr] = useState('');
+  // 全局默认采样参数（窗口与顾问都未指定时生效）
+  const [defaultTemperature, setDefaultTemperature] = useState<number | undefined>(undefined);
+  const [defaultTopP, setDefaultTopP] = useState<number | undefined>(undefined);
+  const [defaultTopK, setDefaultTopK] = useState<number | undefined>(undefined);
+  const [defaultFrequencyPenalty, setDefaultFrequencyPenalty] = useState<number | undefined>(undefined);
+  const [defaultPresencePenalty, setDefaultPresencePenalty] = useState<number | undefined>(undefined);
+  const [defaultMaxTokens, setDefaultMaxTokens] = useState<number | undefined>(undefined);
 
   // Fetch-models states
   const [fetchingModels, setFetchingModels] = useState(false);
@@ -109,6 +116,12 @@ export const ProviderModal: React.FC<ProviderModalProps> = ({
     setModelsStr(p.models.join(', '));
     setDefaultModel(p.defaultModel);
     setCustomHeadersStr(p.customHeaders ? JSON.stringify(p.customHeaders, null, 2) : '');
+    setDefaultTemperature(p.defaultTemperature);
+    setDefaultTopP(p.defaultTopP);
+    setDefaultTopK(p.defaultTopK);
+    setDefaultFrequencyPenalty(p.defaultFrequencyPenalty);
+    setDefaultPresencePenalty(p.defaultPresencePenalty);
+    setDefaultMaxTokens(p.defaultMaxTokens);
     setFetchedModels([]);
     setFetchModelError('');
     setShowModelDropdown(false);
@@ -152,6 +165,12 @@ export const ProviderModal: React.FC<ProviderModalProps> = ({
       enabled: true,
       isSystemDefault: editingProvider?.isSystemDefault || false,
       customHeaders: parsedHeaders,
+      defaultTemperature,
+      defaultTopP,
+      defaultTopK,
+      defaultFrequencyPenalty,
+      defaultPresencePenalty,
+      defaultMaxTokens,
     };
 
     onSaveProvider(providerToSave);
@@ -479,6 +498,113 @@ export const ProviderModal: React.FC<ProviderModalProps> = ({
               />
               <span className="text-[10px] text-slate-500 mt-0.5 block">
                 支持 JSON 格式或每行一条 &quot;Header: Value&quot;，适配聚合站、OneAPI、自建中转认证。
+              </span>
+            </div>
+
+            <div>
+              <label className="block text-[11px] text-slate-400 mb-1">
+                默认采样参数（全局默认，窗口与顾问都未指定时生效）
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <span className="text-[10px] text-slate-500 block mb-0.5">温度</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="2"
+                    step="0.05"
+                    value={defaultTemperature ?? ''}
+                    onChange={(e) =>
+                      setDefaultTemperature(e.target.value === '' ? undefined : parseFloat(e.target.value))
+                    }
+                    placeholder="0.7"
+                    className="w-full bg-slate-950 p-2 rounded-xl border border-slate-700 focus:outline-none focus:border-emerald-500 text-slate-100 font-mono text-[11px]"
+                  />
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-500 block mb-0.5">Top P</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={defaultTopP ?? ''}
+                    onChange={(e) =>
+                      setDefaultTopP(e.target.value === '' ? undefined : parseFloat(e.target.value))
+                    }
+                    placeholder="0.95"
+                    className="w-full bg-slate-950 p-2 rounded-xl border border-slate-700 focus:outline-none focus:border-emerald-500 text-slate-100 font-mono text-[11px]"
+                  />
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-500 block mb-0.5">最大输出</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="128"
+                    value={defaultMaxTokens ?? ''}
+                    onChange={(e) =>
+                      setDefaultMaxTokens(
+                        e.target.value === '' ? undefined : Math.max(0, parseInt(e.target.value, 10) || 0)
+                      )
+                    }
+                    placeholder="不限"
+                    className="w-full bg-slate-950 p-2 rounded-xl border border-slate-700 focus:outline-none focus:border-emerald-500 text-slate-100 font-mono text-[11px]"
+                  />
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-500 block mb-0.5">Top K</span>
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={defaultTopK ?? ''}
+                    onChange={(e) =>
+                      setDefaultTopK(
+                        e.target.value === '' ? undefined : Math.max(1, parseInt(e.target.value, 10) || 1)
+                      )
+                    }
+                    placeholder="不限"
+                    className="w-full bg-slate-950 p-2 rounded-xl border border-slate-700 focus:outline-none focus:border-emerald-500 text-slate-100 font-mono text-[11px]"
+                  />
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-500 block mb-0.5">重复惩罚</span>
+                  <input
+                    type="number"
+                    min="-2"
+                    max="2"
+                    step="0.1"
+                    value={defaultFrequencyPenalty ?? ''}
+                    onChange={(e) =>
+                      setDefaultFrequencyPenalty(
+                        e.target.value === '' ? undefined : parseFloat(e.target.value)
+                      )
+                    }
+                    placeholder="0"
+                    className="w-full bg-slate-950 p-2 rounded-xl border border-slate-700 focus:outline-none focus:border-emerald-500 text-slate-100 font-mono text-[11px]"
+                  />
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-500 block mb-0.5">话题惩罚</span>
+                  <input
+                    type="number"
+                    min="-2"
+                    max="2"
+                    step="0.1"
+                    value={defaultPresencePenalty ?? ''}
+                    onChange={(e) =>
+                      setDefaultPresencePenalty(
+                        e.target.value === '' ? undefined : parseFloat(e.target.value)
+                      )
+                    }
+                    placeholder="0"
+                    className="w-full bg-slate-950 p-2 rounded-xl border border-slate-700 focus:outline-none focus:border-emerald-500 text-slate-100 font-mono text-[11px]"
+                  />
+                </div>
+              </div>
+              <span className="text-[10px] text-slate-500 mt-1 block">
+                留空表示不设置。单个窗口可在「窗口功能 → 窗口 API 参数」里单独覆盖，不会改动这里的全局默认。
               </span>
             </div>
 

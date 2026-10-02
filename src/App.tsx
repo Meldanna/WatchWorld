@@ -32,7 +32,7 @@ import {
   allocateTimelineCodeTag,
   TIMELINE_COLORS,
 } from './lib/timelineMemory';
-import { pullFromWebDav } from './lib/webdavSync';
+import { pullChanges, pushChanges, createSyncState, isSyncConfigured } from './lib/syncEngine';
 import { Header } from './components/Header';
 import { SidebarDrawer } from './components/SidebarDrawer';
 import { ChatMessageList } from './components/ChatMessageList';
@@ -52,6 +52,11 @@ import { TimelineModal } from './components/TimelineModal';
 import { PromptDualBoxModal } from './components/PromptDualBoxModal';
 import { SearchModal } from './components/SearchModal';
 import { DocumentModal } from './components/DocumentModal';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { WindowApiParamsModal } from './components/WindowApiParamsModal';
+import { SessionTextModal } from './components/SessionTextModal';
+import { SummaryModal } from './components/SummaryModal';
+import { ImageStore } from './lib/imageStore';
 
 export default function App() {
   // 1. Persistent State
@@ -110,7 +115,7 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isProviderModalOpen, setIsProviderModalOpen] = useState(false);
   const [isAgentModalOpen, setIsAgentModalOpen] = useState(false);
-  const [isPromptModalOpen, setIsPromptModalOpen] = useState(false);
+  // 旧的 PromptModal 已移除，统一使用 isDualBoxPromptModalOpen
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
   const [isVisibilityModalOpen, setIsVisibilityModalOpen] = useState(false);
   const [isRegexModalOpen, setIsRegexModalOpen] = useState(false);
@@ -123,6 +128,10 @@ export default function App() {
   const [isDualBoxPromptModalOpen, setIsDualBoxPromptModalOpen] = useState(false);
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
   const [isDocumentModalOpen, setIsDocumentModalOpen] = useState(false);
+  const [isWindowApiParamsOpen, setIsWindowApiParamsOpen] = useState(false);
+  const [isSessionTextModalOpen, setIsSessionTextModalOpen] = useState(false);
+  const [isSummaryModalOpen, setIsSummaryModalOpen] = useState(false);
+  const [isSummarizing, setIsSummarizing] = useState(false);
   const [filterByActiveTimeline, setFilterByActiveTimeline] = useState(false);
 
   // 3. Chat runtime states & draft persistence
@@ -132,6 +141,8 @@ export default function App() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const sessionsRef = useRef<ChatSession[]>(sessions);
+  const syncStateRef = useRef(createSyncState());
 
   // Sync draft per session
   useEffect(() => {
@@ -147,26 +158,46 @@ export default function App() {
     }
   };
 
-  // 2.5 WebDAV: 启动时自动拉取最新数据，冲突以时间戳较新为准
+  // 2.5 WebDAV 增量同步：启动时按窗口拉取更新的数据，之后防抖上传改动
   useEffect(() => {
-    if (webdavConfig.enabled) {
-      pullFromWebDav(webdavConfig).then((res) => {
-        if (res.success && res.remoteData) {
-          try {
-            const parsed = JSON.parse(res.remoteData);
-            const localData = JSON.parse(Storage.exportAllData());
-            if ((parsed.exportTime || 0) > (localData.exportTime || 0)) {
-              Storage.importAllData(res.remoteData);
-              setSessions(Storage.getSessions());
-              setWorldDocuments(Storage.getWorldDocuments());
-            }
-          } catch {
-            // ignore
-          }
-        }
-      });
-    }
+    if (!isSyncConfigured(webdavConfig)) return;
+    let cancelled = false;
+    pullChanges(webdavConfig, Storage.getSessions(), syncStateRef.current)
+      .then(({ sessions: pulled }) => {
+        if (cancelled || pulled.length === 0) return;
+        setSessions((prev) => {
+          const map = new Map(prev.map((s) => [s.id, s]));
+          pulled.forEach((s) => map.set(s.id, s));
+          return Array.from(map.values());
+        });
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  useEffect(() => {
+    sessionsRef.current = sessions;
+  }, [sessions]);
+
+  // 编辑后防抖上传（只上传 updatedAt 有变化的窗口）
+  useEffect(() => {
+    if (!isSyncConfigured(webdavConfig) || !webdavConfig.autoSync) return;
+    const timer = window.setTimeout(() => {
+      void pushChanges(webdavConfig, sessions, syncStateRef.current);
+    }, 3000);
+    return () => window.clearTimeout(timer);
+  }, [sessions, webdavConfig]);
+
+  // 兜底定时同步，避免长时间没有编辑就完全不上传
+  useEffect(() => {
+    if (!isSyncConfigured(webdavConfig) || !webdavConfig.autoSync) return;
+    const timer = window.setInterval(() => {
+      void pushChanges(webdavConfig, sessionsRef.current, syncStateRef.current);
+    }, 5 * 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, [webdavConfig]);
 
   // Sync to HTML class for dark/light mode
   useEffect(() => {
@@ -235,8 +266,209 @@ export default function App() {
   // Helper to update active session
   const updateCurrentSession = (updater: (prev: ChatSession) => ChatSession) => {
     setSessions((prevSessions) =>
-      prevSessions.map((s) => (s.id === activeSession.id ? updater(s) : s))
+      prevSessions.map((s) =>
+        s.id === activeSession.id ? { ...updater(s), updatedAt: Date.now() } : s
+      )
     );
+  };
+
+  // 窗口级 API 采样参数：undefined 表示该字段跟随当前 Agent
+  const handleSaveWindowApiParams = (params: {
+    temperature?: number;
+    topP?: number;
+    topK?: number;
+    frequencyPenalty?: number;
+    presencePenalty?: number;
+    maxTokens?: number;
+    imageContextMode?: 'once' | 'history';
+  }) => {
+    updateCurrentSession((prev) => ({
+      ...prev,
+      temperature: params.temperature,
+      topP: params.topP,
+      topK: params.topK,
+      frequencyPenalty: params.frequencyPenalty,
+      presencePenalty: params.presencePenalty,
+      maxTokens: params.maxTokens,
+      imageContextMode: params.imageContextMode,
+    }));
+  };
+
+  // 本窗口文本导入：把解析出的文本段追加为当前窗口的消息
+  const handleImportSessionMessages = (
+    items: { content: string; role: 'user' | 'assistant' }[]
+  ) => {
+    if (!items || items.length === 0) return;
+
+    updateCurrentSession((prev) => {
+      const sessionTimelines = prev.timelines || [];
+      const activeTid = prev.activeTimelineId || sessionTimelines[0]?.id || 'timeline-main';
+      const branch = sessionTimelines.find((t) => t.id === activeTid) || sessionTimelines[0];
+      const maxFloor = prev.messages.reduce((mx, m) => Math.max(mx, m.floorNumber ?? 0), 0);
+      const now = Date.now();
+
+      const newMessages: ChatMessage[] = items.map((item, i) => ({
+        id: `import-${now}-${i}`,
+        role: item.role,
+        content: item.content,
+        timestamp: now + i,
+        // AI 消息的正文以版本形式承载，保持与正常回复一致的结构
+        versions:
+          item.role === 'assistant'
+            ? [{ content: item.content, timestamp: now + i }]
+            : [],
+        currentVersionIndex: 0,
+        timelineId: activeTid,
+        timelineTag: branch?.codeTag || branch?.tag,
+        floorNumber: maxFloor + i + 1,
+        codeTag: branch?.codeTag || branch?.tag || '通用',
+        descriptionTag: branch?.descriptionTag || branch?.name || '通用世界观',
+      }));
+
+      return { ...prev, messages: [...prev.messages, ...newMessages], updatedAt: now };
+    });
+  };
+
+  /**
+   * 统一的系统提示词构造器。
+   * 顺序：本身提示词 → 通用缓存 → 前文总结。
+   * 三部分都通过 systemInstruction 字段发送，因此后端一律以 system 身份识别，
+   * 不会被当作普通用户消息混进对话历史。
+   */
+  const buildSystemInstruction = (session: ChatSession, agent?: Agent): string => {
+    const base =
+      session.systemPromptFixed || session.systemPromptOverride || agent?.systemPrompt || '';
+    const parts: string[] = base ? [base] : [];
+
+    if (session.isCommonPushed && session.systemPromptInjectedCommon) {
+      parts.push(`# 【通用世界观基石缓存】:\n${session.systemPromptInjectedCommon}`);
+    }
+
+    const summaries = session.summaries || [];
+    if (summaries.length > 0) {
+      parts.push(
+        `# 【前文总结（按时间顺序，越靠后越新）】:\n` +
+          summaries
+            .map((s) => `【第 ${s.fromFloor}–${s.toFloor} 楼】\n${s.content}`)
+            .join('\n\n')
+      );
+    }
+
+    return parts.join('\n\n');
+  };
+
+  /**
+   * 已总结的楼层不再发送给 AI —— 总结已经替代了那部分原文。
+   * 这是总结功能省钱的关键：只把总结加进系统提示词、却仍把原文发过去，
+   * 等于总结与原文各发一份，token 不减反增。
+   * UI 仍然完整展示全部消息，这里只影响送往模型的内容。
+   */
+  const dropSummarizedFloors = (msgs: ChatMessage[], session: ChatSession): ChatMessage[] => {
+    const upTo = session.lastSummarizedFloor ?? 0;
+    if (upTo <= 0) return msgs;
+    return msgs.filter((m) => {
+      // 没有楼号的消息无法判定归属，保守保留
+      if (m.floorNumber === undefined) return true;
+      return m.floorNumber > upTo;
+    });
+  };
+
+  // 保存总结配置（提示词 / 模型）
+  const handleSaveSummaryConfig = (patch: { summaryPrompt?: string; summaryModel?: string }) => {
+    updateCurrentSession((prev) => ({ ...prev, ...patch }));
+  };
+
+  const handleDeleteSummary = (id: string) => {
+    updateCurrentSession((prev) => ({
+      ...prev,
+      summaries: (prev.summaries || []).filter((s) => s.id !== id),
+    }));
+  };
+
+  const handleClearSummaries = () => {
+    updateCurrentSession((prev) => ({ ...prev, summaries: [] }));
+  };
+
+  /**
+   * 生成前文总结。
+   * 依据 lastSummarizedFloor 只处理新增消息，因此不会重复总结；
+   * 结果按顺序追加到 summaries，并自动进入系统提示词。
+   */
+  const handleGenerateSummary = async (opts: { prompt: string; model?: string }) => {
+    if (isSummarizing) return;
+
+    const messages = activeSession.messages || [];
+    const maxFloor = messages.reduce((mx, m) => Math.max(mx, m.floorNumber ?? 0), 0);
+    const fromFloor = (activeSession.lastSummarizedFloor ?? 0) + 1;
+    if (fromFloor > maxFloor) return;
+
+    const targets = messages.filter((m) => (m.floorNumber ?? 0) >= fromFloor);
+    const transcript = targets
+      .map((m) => {
+        const who = m.role === 'user' ? '用户' : 'AI';
+        const text =
+          m.role === 'assistant'
+            ? m.versions?.[m.currentVersionIndex]?.content ||
+              m.versions?.[0]?.content ||
+              m.content ||
+              ''
+            : m.content || '';
+        const tag = m.codeTag ? `[${m.codeTag}] ` : '';
+        return `#${m.floorNumber ?? '?'} ${tag}${who}：${text}`;
+      })
+      .join('\n\n');
+
+    const usedModel = opts.model || activeSession.model || activeProvider?.defaultModel || '';
+
+    setIsSummarizing(true);
+    try {
+      let result = '';
+      const summaryRequest: ChatMessage = {
+        id: `summary-req-${Date.now()}`,
+        role: 'user',
+        content: `${opts.prompt}\n\n===== 待总结对话 =====\n${transcript}`,
+        versions: [],
+        currentVersionIndex: 0,
+        timestamp: Date.now(),
+      };
+
+      const finalReply = await sendChatMessage({
+        provider: activeProvider,
+        agent: activeAgent,
+        model: usedModel,
+        messages: [summaryRequest],
+        // 总结指令本身也以系统身份发送，避免被当成普通用户发言
+        systemInstruction:
+          '你是一名严谨的剧情总结助手。只依据提供的对话内容做总结，不添加任何未出现的信息。',
+        temperature: 0.3,
+        onChunk: (acc: string) => {
+          result = acc;
+        },
+      });
+
+      const content = (finalReply || result || '').trim();
+      if (!content) return;
+
+      updateCurrentSession((prev) => ({
+        ...prev,
+        summaries: [
+          ...(prev.summaries || []),
+          {
+            id: `summary-${Date.now()}`,
+            content,
+            fromFloor,
+            toFloor: maxFloor,
+            model: usedModel || undefined,
+            createdAt: Date.now(),
+          },
+        ],
+        lastSummarizedFloor: maxFloor,
+      }));
+    } catch (err) {
+      console.error('生成前文总结失败:', err);
+    } finally {
+      setIsSummarizing(false);
+    }
   };
 
   // Toggle UI light/dark mode
@@ -292,8 +524,9 @@ export default function App() {
   }, [activeSession]);
 
   // Send a new chat message
-  const handleSendMessage = async (text: string) => {
-    if (!text.trim() || isStreaming) return;
+  const handleSendMessage = async (text: string, imageIds?: string[]) => {
+    // 允许只发图片、不带文字
+    if ((!text.trim() && !(imageIds && imageIds.length > 0)) || isStreaming) return;
 
     const processedText = applyRegexRules(text, regexRules, 'input');
     const userTokens = estimateTokens(processedText);
@@ -376,6 +609,7 @@ export default function App() {
       codeTag: currentBranch.codeTag || currentBranch.tag || '通用',
       descriptionTag: currentBranch.descriptionTag || currentBranch.name || '通用世界观',
       isCommon: isMainCommon,
+      imageIds: imageIds && imageIds.length > 0 ? imageIds : undefined,
     };
 
     const assistantMessage: ChatMessage = {
@@ -437,28 +671,23 @@ export default function App() {
       : undefined;
 
     // 3.2 提示词系统：双框组合与推入通用缓存
-    const baseSystemPrompt =
-      activeSession.systemPromptFixed ||
-      activeSession.systemPromptOverride ||
-      activeAgent.systemPrompt;
-
-    const combinedSystemInstruction = [
-      baseSystemPrompt,
-      activeSession.isCommonPushed && activeSession.systemPromptInjectedCommon
-        ? `\n# 【通用世界观基石缓存】:\n${activeSession.systemPromptInjectedCommon}`
-        : '',
-    ]
-      .filter(Boolean)
-      .join('\n\n');
+    // 本身提示词 + 通用缓存 + 前文总结，统一以系统身份发送
+    const combinedSystemInstruction = buildSystemInstruction(activeSession, activeAgent);
 
     try {
       const finalReply = await sendChatMessage({
         provider: activeProvider,
         agent: activeAgent,
         model: activeSession.model || activeProvider.defaultModel,
-        messages: [...activeSession.messages, userMessage],
+        messages: dropSummarizedFloors([...activeSession.messages, userMessage], activeSession),
         systemInstruction: combinedSystemInstruction,
-        temperature: activeAgent.temperature,
+        temperature: activeSession.temperature ?? activeAgent.temperature,
+        topP: activeSession.topP ?? activeAgent.topP,
+        topK: activeSession.topK,
+        frequencyPenalty: activeSession.frequencyPenalty,
+        presencePenalty: activeSession.presencePenalty,
+        maxTokens: activeSession.maxTokens,
+        imageContextMode: activeSession.imageContextMode,
         aiContextVisibility: activeSession.aiContextVisibility || 'all',
         connectedKnowledge: connectedKnowledgeItems,
         activeSkills: activeConnectedSkills,
@@ -626,9 +855,15 @@ export default function App() {
         provider: activeProvider,
         agent: activeAgent,
         model: activeSession.model || activeProvider.defaultModel,
-        messages: contextMessages,
-        systemInstruction: activeSession.systemPromptOverride || activeAgent.systemPrompt,
-        temperature: activeAgent.temperature,
+        messages: dropSummarizedFloors(contextMessages, activeSession),
+        systemInstruction: buildSystemInstruction(activeSession, activeAgent),
+        temperature: activeSession.temperature ?? activeAgent.temperature,
+        topP: activeSession.topP ?? activeAgent.topP,
+        topK: activeSession.topK,
+        frequencyPenalty: activeSession.frequencyPenalty,
+        presencePenalty: activeSession.presencePenalty,
+        maxTokens: activeSession.maxTokens,
+        imageContextMode: activeSession.imageContextMode,
         aiContextVisibility: activeSession.aiContextVisibility || 'all',
         connectedKnowledge: connectedKnowledgeItems,
         activeSkills: activeConnectedSkills,
@@ -750,11 +985,21 @@ export default function App() {
     });
   };
 
+  /** 清理没有被任何消息引用的图片，避免 IndexedDB 无限增长 */
+  const pruneOrphanImages = () => {
+    const used = sessionsRef.current.flatMap((s) =>
+      (s.messages || []).flatMap((m) => m.imageIds || [])
+    );
+    void ImageStore.pruneOrphans(used);
+  };
+
   const handleDeleteMessage = (messageId: string) => {
     updateCurrentSession((prev) => ({
       ...prev,
       messages: prev.messages.filter((m) => m.id !== messageId),
     }));
+    // 删除后清理不再被引用的图片，避免 IndexedDB 无限增长
+    window.setTimeout(pruneOrphanImages, 0);
   };
 
   const handleStopGeneration = () => {
@@ -801,6 +1046,11 @@ export default function App() {
         setActiveSessionId(remaining[0].id);
       }
     }
+    // 被删会话的图片若已无人引用，一并清理
+    const used = remaining.flatMap((s) =>
+      (s.messages || []).flatMap((m) => m.imageIds || [])
+    );
+    void ImageStore.pruneOrphans(used);
   };
 
   const handleMoveSessionGroup = (sessionId: string, targetGroupId: string) => {
@@ -992,7 +1242,7 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `omnichat-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `watchworld-backup-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -1309,14 +1559,9 @@ export default function App() {
       {/* Header - Simplified */}
       <Header
         currentSession={activeSession}
-        theme={theme}
         uiMode={uiMode}
         onToggleUiMode={handleToggleUiMode}
         onOpenSidebar={() => setIsSidebarOpen(true)}
-        onOpenSettings={() => setIsDisplaySettingsModalOpen(true)}
-        onOpenTimelineModal={() => setIsTimelineModalOpen(true)}
-        onOpenDocumentModal={() => setIsDocumentModalOpen(true)}
-        onTriggerRoleAnalysis={handleTriggerRoleAnalysis}
       />
 
       {/* Main Conversation Window */}
@@ -1359,18 +1604,9 @@ export default function App() {
           isStreaming={isStreaming}
           activeAgent={activeAgent}
           aiContextVisibility={activeSession.aiContextVisibility || 'all'}
-          connectedKnowledgeCount={connectedKnowledgeItems.length}
-          activeRegexCount={regexRules.filter((r) => r.enabled).length}
-          connectedSkillCount={activeConnectedSkills.length}
-          activeMcpCount={mcpServers.filter((s) => s.enabled).length}
-          theme={theme}
-          onOpenPromptModal={() => setIsPromptModalOpen(true)}
+          onOpenPromptModal={() => setIsDualBoxPromptModalOpen(true)}
           onOpenAgentModal={() => setIsAgentModalOpen(true)}
           onOpenVisibilityModal={() => setIsVisibilityModalOpen(true)}
-          onOpenKnowledgeModal={() => setIsKnowledgeModalOpen(true)}
-          onOpenRegexModal={() => setIsRegexModalOpen(true)}
-          onOpenMcpModal={() => setIsMcpModalOpen(true)}
-          onOpenSkillModal={() => setIsSkillModalOpen(true)}
           inputDraft={inputDraft}
           setInputDraft={handleDraftChange}
           timelines={activeSession.timelines || []}
@@ -1387,6 +1623,14 @@ export default function App() {
           onTriggerRoleAnalysis={handleTriggerRoleAnalysis}
           onOpenDualBoxPromptModal={() => setIsDualBoxPromptModalOpen(true)}
           onOpenSearchModal={() => setIsSearchModalOpen(true)}
+          onOpenTimelineModal={() => setIsTimelineModalOpen(true)}
+          onOpenDocumentModal={() => setIsDocumentModalOpen(true)}
+          onOpenWindowApiParams={() => setIsWindowApiParamsOpen(true)}
+          onOpenSessionText={() => setIsSessionTextModalOpen(true)}
+          onOpenSummary={() => setIsSummaryModalOpen(true)}
+          models={activeProvider?.models || []}
+          activeModel={activeSession.model || activeProvider?.defaultModel || ''}
+          onSelectModel={(m) => updateCurrentSession((prev) => ({ ...prev, model: m }))}
         />
       </main>
 
@@ -1409,15 +1653,22 @@ export default function App() {
         onOpenDisplaySettingsModal={() => setIsDisplaySettingsModalOpen(true)}
         onOpenTimelineModal={() => setIsTimelineModalOpen(true)}
         onOpenAgentModal={() => setIsAgentModalOpen(true)}
-        onOpenPromptModal={() => setIsPromptModalOpen(true)}
+        onOpenPromptModal={() => setIsDualBoxPromptModalOpen(true)}
         onOpenKnowledgeModal={() => setIsKnowledgeModalOpen(true)}
         onOpenRegexModal={() => setIsRegexModalOpen(true)}
         onOpenThemeModal={() => setIsThemeModalOpen(true)}
         onOpenMcpModal={() => setIsMcpModalOpen(true)}
         onOpenSkillModal={() => setIsSkillModalOpen(true)}
+        activeMcpCount={mcpServers.filter((s) => s.enabled).length}
+        connectedSkillCount={activeConnectedSkills.length}
+        connectedKnowledgeCount={connectedKnowledgeItems.length}
+        activeRegexCount={regexRules.filter((r) => r.enabled).length}
         onExportData={handleExportData}
         onImportData={handleImportData}
       />
+
+      {/* 弹窗区域统一兜底：任一弹窗渲染出错只降级该区域，不再让整页白屏 */}
+      <ErrorBoundary label="弹窗">
 
       {/* Provider Settings Modal */}
       <ProviderModal
@@ -1438,25 +1689,13 @@ export default function App() {
         isOpen={isAgentModalOpen}
         onClose={() => setIsAgentModalOpen(false)}
         agents={agents}
-        activeAgentId={activeAgent.id}
+        activeAgentId={activeAgent?.id ?? ''}
         onSelectAgent={handleSelectAgent}
         onSaveAgent={handleSaveAgent}
         onDeleteAgent={handleDeleteAgent}
       />
 
-      {/* Prompt Modal */}
-      <PromptModal
-        isOpen={isPromptModalOpen}
-        onClose={() => setIsPromptModalOpen(false)}
-        prompts={prompts}
-        activeSystemPrompt={activeSession.systemPromptOverride}
-        onInsertToInput={(content) => {
-          setInputDraft((prev) => (prev ? `${prev}\n${content}` : content));
-        }}
-        onApplyAsSystemPrompt={handleApplyAsSystemPrompt}
-        onSavePrompt={handleSavePrompt}
-        onDeletePrompt={handleDeletePrompt}
-      />
+      {/* 已移除旧的 PromptModal，统一使用双框提示词系统 */}
 
       {/* Group Modal */}
       <GroupModal
@@ -1593,6 +1832,41 @@ export default function App() {
         onInjectAsPrompt={handleInjectDocAsPrompt}
         theme={theme}
       />
+
+      {/* 窗口级 API 参数（温度 / Top P / 最大输出），独立于全局 API 配置 */}
+      <WindowApiParamsModal
+        isOpen={isWindowApiParamsOpen}
+        onClose={() => setIsWindowApiParamsOpen(false)}
+        session={activeSession}
+        inheritedTemperature={activeAgent?.temperature ?? activeProvider?.defaultTemperature ?? 0.7}
+        inheritedTopP={activeAgent?.topP ?? activeProvider?.defaultTopP ?? 0.95}
+        modelName={activeSession.model || activeProvider?.defaultModel || '未指定'}
+        providerName={activeProvider?.name || '未指定'}
+        onSave={handleSaveWindowApiParams}
+      />
+
+      {/* 本窗口文本导入 / 导出 */}
+      <SessionTextModal
+        isOpen={isSessionTextModalOpen}
+        onClose={() => setIsSessionTextModalOpen(false)}
+        session={activeSession}
+        onImportMessages={handleImportSessionMessages}
+      />
+
+      {/* 前文总结：结果按顺序推入系统提示词 */}
+      <SummaryModal
+        isOpen={isSummaryModalOpen}
+        onClose={() => setIsSummaryModalOpen(false)}
+        session={activeSession}
+        models={activeProvider?.models || []}
+        currentModel={activeSession.model || activeProvider?.defaultModel || ''}
+        isSummarizing={isSummarizing}
+        onSaveConfig={handleSaveSummaryConfig}
+        onGenerate={handleGenerateSummary}
+        onDeleteSummary={handleDeleteSummary}
+        onClearSummaries={handleClearSummaries}
+      />
+      </ErrorBoundary>
     </div>
   );
 }

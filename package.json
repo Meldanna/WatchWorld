@@ -1,8 +1,27 @@
 {
-  "name": "react-example",
+  "name": "watchworld",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.2.5",
+  "description": "移动端多API智能工作台，支持自定义Agent、提示词库、窗口分组、AI消息显隐控制与分支回溯。",
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Meldanna/WatchWorld"
+  },
+  "bugs": {
+    "url": "https://github.com/Meldanna/WatchWorld/issues"
+  },
+  "keywords": [
+    "chat",
+    "ai",
+    "gemini",
+    "openai",
+    "claude",
+    "multi-provider",
+    "pwa",
+    "webdav"
+  ],
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build",

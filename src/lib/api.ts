@@ -12,6 +12,7 @@ import {
 import { applyRegexRules } from './regexProcessor';
 import { generateSmartLocalResponse } from './mockAi';
 import { rearrangeMessagesForAi, formatMessageWithFloorAndTag } from './timelineMemory';
+import { ImageStore } from './imageStore';
 
 export interface SendChatParams {
   provider: ApiProviderConfig;
@@ -21,6 +22,10 @@ export interface SendChatParams {
   systemInstruction?: string;
   temperature?: number;
   topP?: number;
+  topK?: number;
+  frequencyPenalty?: number;
+  presencePenalty?: number;
+  maxTokens?: number;
   aiContextVisibility?: AiContextVisibilityFilter;
   connectedKnowledge?: KnowledgeItem[];
   activeSkills?: AgentSkill[];
@@ -30,6 +35,8 @@ export interface SendChatParams {
   allTimelines?: TimelineBranch[];
   activeTimelineId?: string;
   timelineMemoryEnabled?: boolean;
+  /** 'once'（默认）图片只在最后一轮携带；'history' 图片随消息留在上下文 */
+  imageContextMode?: 'once' | 'history';
   onChunk?: (partial: string) => void;
   signal?: AbortSignal;
 }
@@ -42,6 +49,10 @@ export async function sendChatMessage({
   systemInstruction,
   temperature,
   topP,
+  topK,
+  frequencyPenalty,
+  presencePenalty,
+  maxTokens,
   aiContextVisibility = 'all',
   connectedKnowledge = [],
   activeSkills = [],
@@ -51,6 +62,7 @@ export async function sendChatMessage({
   allTimelines = [],
   activeTimelineId,
   timelineMemoryEnabled = false,
+  imageContextMode = 'once',
   onChunk,
   signal,
 }: SendChatParams): Promise<string> {
@@ -141,7 +153,7 @@ export async function sendChatMessage({
     .join('\n\n');
 
   // 7. Format messages with floor numbers and dual tags for clear structure
-  const formattedForBackend = filteredMessagesForAi.map((m) => {
+  const textFormatted = filteredMessagesForAi.map((m) => {
     let content =
       m.role === 'assistant'
         ? (m.versions[m.currentVersionIndex] || m.versions[0])?.content || m.content
@@ -160,6 +172,33 @@ export async function sendChatMessage({
     return {
       role: m.role,
       content,
+      imageIds: m.imageIds,
+    };
+  });
+
+  // 7.1 图片装配
+  // 'once' 模式下只有最后一条消息携带图片，避免历史图片在每一轮重复计费
+  const lastIndex = textFormatted.length - 1;
+  const withKeptImages = textFormatted.map((item, idx) => ({
+    ...item,
+    imageIds:
+      imageContextMode === 'history' || idx === lastIndex ? item.imageIds : undefined,
+  }));
+
+  const neededIds = withKeptImages.flatMap((i) => i.imageIds || []);
+  const imageMap = neededIds.length > 0 ? await ImageStore.getMany(neededIds) : {};
+
+  const formattedForBackend = withKeptImages.map(({ role, content, imageIds }) => {
+    const images = (imageIds || [])
+      .map((id) => imageMap[id])
+      .filter(Boolean)
+      .map((img) => ({ dataUrl: img.dataUrl, mime: img.mime }));
+
+    return {
+      role,
+      // 纯图片消息给一个占位文本，避免出现空 content
+      content: content || (images.length > 0 ? '[图片]' : ''),
+      ...(images.length > 0 ? { images } : {}),
     };
   });
 
@@ -178,8 +217,13 @@ export async function sendChatMessage({
         model: model || provider.defaultModel || 'gemini-2.0-flash',
         messages: formattedForBackend,
         systemInstruction: fullSystemInstruction,
-        temperature: temperature ?? agent.temperature ?? 0.7,
-        topP: topP ?? agent.topP ?? 0.95,
+        temperature: temperature ?? agent.temperature ?? provider.defaultTemperature ?? 0.7,
+        topP: topP ?? agent.topP ?? provider.defaultTopP ?? 0.95,
+        // JSON.stringify 会忽略 undefined 的键，因此未设置的参数不会发给后端
+        topK: topK ?? provider.defaultTopK,
+        frequencyPenalty: frequencyPenalty ?? provider.defaultFrequencyPenalty,
+        presencePenalty: presencePenalty ?? provider.defaultPresencePenalty,
+        maxTokens: maxTokens ?? provider.defaultMaxTokens,
         stream: true,
       }),
       signal,

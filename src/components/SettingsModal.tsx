@@ -97,7 +97,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const handleManualPushWebDav = async () => {
     setTestResult({ status: 'testing', message: '正在同步备份至 WebDAV...' });
-    const dataStr = Storage.exportAllData();
+    // 远端备份时，默认不上传 API 密钥与 WebDAV 密码。
+    // 只有用户主动勾选「包含 API 配置」时，才一并传上去。
+    const dataStr = Storage.exportAllData({
+      redactSecrets: !webdavConfig.includeApiConfig,
+    });
     const res = await pushToWebDav(webdavConfig, dataStr);
     setTestResult({
       status: res.success ? 'success' : 'error',
@@ -385,6 +389,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     onChangeWebDavConfig?.({ ...webdavConfig, autoSync: e.target.checked })
                   }
                   className="w-4 h-4 accent-indigo-600 rounded"
+                />
+              </div>
+
+              <div className="flex items-start justify-between p-3 rounded-xl bg-rose-50/60 dark:bg-rose-950/20 border border-rose-200/60 dark:border-rose-800/40 text-xs">
+                <div className="flex-1 pr-3">
+                  <div className="font-semibold text-rose-800 dark:text-rose-200">在手动备份时包含 API 配置</div>
+                  <div className="text-[11px] text-rose-700/90 dark:text-rose-400/90 mt-0.5">
+                    打开后，「立即同步到云端」会把你的 API 密钥与 WebDAV 密码一并上传到远端。
+                    建议只在信任的个人云盘使用，或者保持关闭（恢复后需重新填入密钥）。
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={webdavConfig.includeApiConfig ?? false}
+                  onChange={(e) =>
+                    onChangeWebDavConfig?.({ ...webdavConfig, includeApiConfig: e.target.checked })
+                  }
+                  className="w-4 h-4 accent-rose-600 rounded mt-0.5"
                 />
               </div>
 

@@ -57,6 +57,9 @@ export const PromptDualBoxModal: React.FC<PromptDualBoxModalProps> = ({
     (m) => m.isCommon || m.timelineId === 'timeline-main' || m.codeTag === '通用'
   );
 
+  // 已生成的前文总结：按顺序拼接进系统提示词，此处只做展示
+  const summaries = session.summaries || [];
+
   const handleTogglePushCommon = () => {
     if (isCommonPushed) {
       onRevertCommonMessages();
@@ -276,6 +279,46 @@ export const PromptDualBoxModal: React.FC<PromptDualBoxModalProps> = ({
                 />
               </div>
             )}
+          </div>
+
+          {/* Box 3: 前文总结推入框（自动以系统提示词身份发送） */}
+          <div className="space-y-1.5 pt-1 border-t border-slate-200 dark:border-slate-800/80">
+            <div className="flex items-center justify-between text-xs">
+              <label className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-amber-500" />
+                <span>【前文总结】</span>
+                <span className="text-[10px] text-slate-400 font-normal font-mono">
+                  (自动推入·系统提示词身份)
+                </span>
+              </label>
+              <span className="text-[10px] text-slate-400 font-mono">
+                {summaries.length} 条 · 已总结至 #{session.lastSummarizedFloor ?? 0}
+              </span>
+            </div>
+
+            <div className="rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 p-3 max-h-44 overflow-y-auto">
+              {summaries.length === 0 ? (
+                <p className="text-[11px] text-slate-400">
+                  暂无总结。在「窗口功能 → 前文总结」生成后会自动出现在这里，并随每次请求以系统提示词身份发送。
+                </p>
+              ) : (
+                <div className="space-y-2.5">
+                  {summaries.map((s, i) => (
+                    <div key={s.id} className="text-[11px]">
+                      <span className="font-mono text-indigo-500 dark:text-indigo-400">
+                        #{i + 1} · 第 {s.fromFloor}–{s.toFloor} 楼
+                      </span>
+                      <pre className="whitespace-pre-wrap font-sans text-slate-700 dark:text-slate-300 mt-0.5 leading-relaxed">
+                        {s.content}
+                      </pre>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <p className="text-[10px] text-slate-400">
+              总结按顺序拼接在通用缓存之后，以 system 身份发送；增删请到「窗口功能 → 前文总结」。
+            </p>
           </div>
         </div>
 

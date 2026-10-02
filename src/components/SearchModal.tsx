@@ -31,34 +31,36 @@ export const SearchModal: React.FC<SearchModalProps> = ({
 }) => {
   const [keyword, setKeyword] = useState('');
 
-  if (!isOpen) return null;
-
+  // ⚠️ Hook 必须在任何条件 return 之前调用。
+  // 之前 useMemo 写在 `if (!isOpen) return null` 之后：isOpen 由 false 变 true 时
+  // hook 数量从 1 变成 2，React 抛 "Rendered more hooks than during the previous render"，
+  // 表现为首次打开渲染失败、点「关闭并重试」才成功。
   const results = useMemo(() => {
     const q = keyword.trim().toLowerCase();
     if (!q) return [];
 
-    return messages
-      .filter((m) => {
-        const text =
-          m.role === 'assistant'
-            ? (m.versions[m.currentVersionIndex] || m.versions[0])?.content || m.content
-            : m.content;
-        return text.toLowerCase().includes(q);
-      })
-      .map((m) => {
-        const text =
-          m.role === 'assistant'
-            ? (m.versions[m.currentVersionIndex] || m.versions[0])?.content || m.content
-            : m.content;
+    const safeMessages = Array.isArray(messages) ? messages : [];
+    const safeTimelines = Array.isArray(timelines) ? timelines : [];
 
-        const timeline = timelines.find((t) => t.id === m.timelineId);
-        return {
-          message: m,
-          text,
-          timeline,
-        };
-      });
+    // 取消息当前生效版本的正文，兼容旧数据中 versions / content 缺失的情况
+    const textOf = (m: ChatMessage): string => {
+      if (m.role === 'assistant') {
+        const version = m.versions?.[m.currentVersionIndex] ?? m.versions?.[0];
+        return version?.content || m.content || '';
+      }
+      return m.content || '';
+    };
+
+    return safeMessages
+      .filter((m) => textOf(m).toLowerCase().includes(q))
+      .map((m) => ({
+        message: m,
+        text: textOf(m),
+        timeline: safeTimelines.find((t) => t.id === m.timelineId),
+      }));
   }, [keyword, messages, timelines]);
+
+  if (!isOpen) return null;
 
   const handleSelect = (messageId: string) => {
     onJumpToMessage(messageId);
@@ -98,7 +100,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
         {/* Results Info */}
         <div className="px-4 py-2 bg-slate-50 dark:bg-slate-950/60 border-b border-slate-200 dark:border-slate-800/80 flex items-center justify-between text-xs text-slate-500">
           <span>{keyword ? `找到 ${results.length} 条相关消息` : '请输入搜索关键词'}</span>
-          <span className="text-[11px] text-slate-400">当前窗口共 {messages.length} 条消息</span>
+          <span className="text-[11px] text-slate-400">当前窗口共 {messages?.length ?? 0} 条消息</span>
         </div>
 
         {/* Results List */}

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   BookOpen,
   Plus,
@@ -12,6 +12,7 @@ import {
   Layers,
   Save,
   Search,
+  UploadCloud,
 } from 'lucide-react';
 import { WorldDocument } from '../types';
 import { ThemeConfig } from '../lib/theme';
@@ -44,6 +45,7 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
   const [editCategory, setEditCategory] = useState<WorldDocument['category']>('worldview');
   const [editContent, setEditContent] = useState('');
   const [copied, setCopied] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
 
@@ -60,6 +62,34 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
     setEditTitle('');
     setEditCategory('worldview');
     setEditContent('');
+  };
+
+  // 批量导入本地文本文件为设定文档
+  const handleFilesUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (files.length === 0) return;
+
+    const now = Date.now();
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      try {
+        const text = await file.text();
+        if (!text.trim()) continue;
+        const ext = file.name.includes('.') ? file.name.split('.').pop() || '' : '';
+        onSaveDocument({
+          id: `doc-file-${now}-${i}`,
+          title: file.name.replace(/\.[^.]+$/, '') || file.name,
+          category: 'custom',
+          content: text,
+          createdAt: now + i,
+          updatedAt: now + i,
+          tags: ['导入', ext].filter(Boolean),
+        });
+      } catch (err) {
+        console.error(`读取文件失败: ${file.name}`, err);
+      }
+    }
   };
 
   const handleStartEdit = (doc: WorldDocument) => {
@@ -149,6 +179,21 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
                   className="w-full pl-8 pr-2 py-1.5 text-xs rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 focus:outline-none"
                 />
               </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept=".txt,.md,.json,.csv,.log,.yaml,.yml,text/*"
+                className="hidden"
+                onChange={handleFilesUpload}
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="p-1.5 rounded-lg bg-slate-600 text-white hover:bg-slate-700 transition-colors shadow-xs"
+                title="从本地导入文本文件（可多选），每个文件成为一篇设定文档"
+              >
+                <UploadCloud className="w-4 h-4" />
+              </button>
               <button
                 onClick={handleStartCreate}
                 className="p-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors shadow-xs"

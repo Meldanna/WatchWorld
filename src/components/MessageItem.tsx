@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ChatMessage,
   Agent,
@@ -10,6 +10,7 @@ import { MarkdownRenderer } from './MarkdownRenderer';
 import { ThemeConfig } from '../lib/theme';
 import { formatTimestamp, formatLatency, formatTokenCount, estimateTokens } from '../lib/tokenEstimator';
 import { getTimelineColorConfig } from '../lib/timelineMemory';
+import { ImageStore, StoredImage } from '../lib/imageStore';
 import {
   ChevronLeft,
   ChevronRight,
@@ -67,6 +68,26 @@ export const MessageItem: React.FC<MessageItemProps> = ({
   const [copied, setCopied] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editDraft, setEditDraft] = useState('');
+  const [images, setImages] = useState<StoredImage[]>([]);
+  const [previewSrc, setPreviewSrc] = useState<string | null>(null);
+
+  // 图片本体存于 IndexedDB，这里按 id 异步取回
+  const imageKey = (message.imageIds || []).join(',');
+  useEffect(() => {
+    let cancelled = false;
+    const ids = message.imageIds || [];
+    if (ids.length === 0) {
+      setImages([]);
+      return;
+    }
+    ImageStore.getMany(ids).then((map) => {
+      if (cancelled) return;
+      setImages(ids.map((id) => map[id]).filter(Boolean));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [imageKey]);
 
   const isUser = message.role === 'user';
   const isAssistant = message.role === 'assistant';
@@ -240,6 +261,28 @@ export const MessageItem: React.FC<MessageItemProps> = ({
             : 'bg-white dark:bg-slate-900/90 text-slate-800 dark:text-slate-100 rounded-tl-sm border border-slate-200 dark:border-slate-800/80 shadow-sm'
         }`}
       >
+        {/* 消息附图（点击可看大图） */}
+        {images.length > 0 && (
+          <div className={`flex flex-wrap gap-2 mb-2 ${isUser ? 'justify-end' : 'justify-start'}`}>
+            {images.map((img) => (
+              <button
+                key={img.id}
+                type="button"
+                onClick={() => setPreviewSrc(img.dataUrl)}
+                className="rounded-lg overflow-hidden border transition-transform hover:scale-[1.02]"
+                style={{ borderColor: 'rgba(148,163,184,0.35)' }}
+                title={img.name ? `${img.name}（点击查看大图）` : '点击查看大图'}
+              >
+                <img
+                  src={img.dataUrl}
+                  alt={img.name || '消息附图'}
+                  className="block max-w-[180px] max-h-[180px] object-cover"
+                />
+              </button>
+            ))}
+          </div>
+        )}
+
         {isEditing ? (
           <div className="w-full flex flex-col gap-2">
             <textarea
@@ -333,6 +376,29 @@ export const MessageItem: React.FC<MessageItemProps> = ({
           </div>
         )}
       </div>
+
+      {/* 图片大图预览 */}
+      {previewSrc && (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/80"
+          onClick={() => setPreviewSrc(null)}
+          role="dialog"
+          aria-label="图片预览"
+        >
+          <img
+            src={previewSrc}
+            alt="图片预览"
+            className="max-w-full max-h-full rounded-lg shadow-2xl object-contain"
+          />
+          <button
+            type="button"
+            onClick={() => setPreviewSrc(null)}
+            className="absolute top-4 right-4 px-3 py-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-white text-xs font-medium transition-colors"
+          >
+            关闭
+          </button>
+        </div>
+      )}
 
       {/* Action Toolbar */}
       {!isEditing && (

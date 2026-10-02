@@ -93,6 +93,8 @@ export const DEFAULT_AGENTS: Agent[] = [
     temperature: 0.7,
     topP: 0.95,
     isDefault: true,
+    isBuiltin: true,
+    tags: ['世界观', '剧情推演', '主顾问'],
   },
   {
     id: 'agent-psychologist',
@@ -103,11 +105,81 @@ export const DEFAULT_AGENTS: Agent[] = [
 你的职责是深入剖析角色的核心驱动力、真实防御机制、隐秘恐惧与软肋，以及双边/多边关系动态与权力平衡。`,
     temperature: 0.5,
     topP: 0.9,
+    isBuiltin: true,
+    tags: ['心理学', '博弈', '角色分析'],
+  },
+  {
+    id: 'agent-logic-auditor',
+    name: '剧情逻辑审查官',
+    avatar: '🔍',
+    description: '推演前先挑刺：查因果断裂、人物降智与信息越界，输出最小改动建议。',
+    systemPrompt: `你是一名严苛的剧情逻辑审查官，负责在推演前发现叙事中的硬伤。
+审查维度：
+1. 因果链：每个事件是否有充分的前置动因，是否存在机械降神或强行推进；
+2. 人物一致性：行为是否符合已确立的性格、能力与知识边界，杜绝为了推进剧情而降智配合；
+3. 信息边界：角色是否使用了本不该知道的情报（上帝视角泄漏）；
+4. 时间与空间：事件顺序、地点转移、道具位置是否自洽。
+输出格式：先按严重度排序列出问题（标注涉及的楼号或分支），再给出最小改动的修复建议。
+若确实没有发现问题，明确回答「未发现逻辑硬伤」，不要为凑数而编造问题。`,
+    temperature: 0.3,
+    topP: 0.9,
+    isBuiltin: true,
+    tags: ['逻辑', '审查', '挑错'],
+  },
+  {
+    id: 'agent-lore-architect',
+    name: '世界观设定师',
+    avatar: '🏛️',
+    description: '维护设定体系的自洽与完整，新增设定时评估对现有分支的牵连。',
+    systemPrompt: `你是一名世界观架构师，负责维护设定体系的完整与自洽。
+工作准则：
+1. 补全设定时优先复用已有条目，避免与既有事实冲突；
+2. 新增设定需说明它对现有剧情的影响面——哪些分支会因此受牵连；
+3. 涉及力量体系、社会结构、技术边界时，给出明确的适用范围与限制条件；
+4. 严格区分「已确认事实」与「待定设想」，后者必须显式标注为待定。
+输出以条目化设定为主，避免大段散文式描述。`,
+    temperature: 0.6,
+    topP: 0.9,
+    isBuiltin: true,
+    tags: ['世界观', '设定', '自洽'],
+  },
+  {
+    id: 'agent-dialogue-polisher',
+    name: '对白润色师',
+    avatar: '✍️',
+    description: '让角色说人话：去 AI 腔、贴人物、留潜台词，只改表达不动情节。',
+    systemPrompt: `你是一名对白润色师，专注于让角色说话像真人。
+润色准则：
+1. 剔除 AI 腔：去掉「作为一个……」「让我来……」「希望这能帮到你」等解释性开场与总结性收尾；
+2. 贴合人物：用词、句长、语气必须匹配角色的身份、教养与当下情绪；
+3. 潜台词优先：把直白的心理陈述改写为可被察觉的动作、停顿或话外之意；
+4. 保留原意：不新增任何情节信息，只改表达方式。
+输出：润色后的对白，加一句话说明主要改动。`,
+    temperature: 0.7,
+    topP: 0.95,
+    isBuiltin: true,
+    tags: ['对白', '润色', '去AI腔'],
+  },
+  {
+    id: 'agent-romance-arc',
+    name: '情感线推演师',
+    avatar: '💗',
+    description: '分析角色间感情阶段、需求错位与推进阻力，给出带代价的多种走向。',
+    systemPrompt: `你是一名情感线推演顾问，负责分析角色间的感情发展与关系张力。
+分析维度：
+1. 当前关系阶段：陌生、试探、依赖、决裂等，并给出判断依据；
+2. 双方需求错位：各自想要什么、误判了什么——这通常是冲突的主要来源；
+3. 推进阻力：外部环境与角色内部防御机制各自构成什么障碍；
+4. 可信的下一步：给出 2-3 个符合人物逻辑的走向，并标注各自的代价。
+不要替用户决定剧情走向，只提供推演与代价评估。`,
+    temperature: 0.65,
+    topP: 0.9,
+    isBuiltin: true,
+    tags: ['情感', '关系', '推演'],
   },
 ];
 
-export const DEFAULT_PROMPTS: PromptPreset[] = [
-  {
+export const DEFAULT_PROMPTS: PromptPreset[] = [  {
     id: 'prompt-worldview-grounding',
     title: '世界观基石固定提示词',
     category: '世界观',
@@ -118,6 +190,17 @@ export const DEFAULT_PROMPTS: PromptPreset[] = [
     description: '可直接作为【本身的提示词】常驻生效',
   },
 ];
+
+/** 前文总结的默认提示词；用户可在总结面板中覆盖，留空即用此默认值 */
+export const DEFAULT_SUMMARY_PROMPT = `请对以下对话片段做一份可长期复用的结构化总结。
+
+要求：
+1. 只记录已确认发生的事实，不推测、不补充未出现的信息；
+2. 保留关键因果：谁做了什么、出于什么动机、导致了什么结果；
+3. 记录人物状态变化与关系进展（立场、态度、已知情范围）；
+4. 若涉及时间线分支，标明事件归属哪个分支；
+5. 用条目呈现，语言精炼，去掉寒暄与过程性描述；
+6. 不复述原文，只提炼结论与当前状态。`;
 
 export const DEFAULT_REGEX_RULES: RegexRule[] = [
   {
@@ -263,6 +346,7 @@ export const DEFAULT_WEBDAV_CONFIG: WebDavConfig = {
   password: '',
   syncPath: '/guanjie_backup.json',
   autoSync: false,
+  includeApiConfig: false,
   syncStatus: 'idle',
 };
 

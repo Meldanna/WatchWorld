@@ -55,6 +55,11 @@ interface SidebarDrawerProps {
   onOpenThemeModal: () => void;
   onOpenMcpModal: () => void;
   onOpenSkillModal: () => void;
+  // 各全局功能的当前激活计数，以徽章形式显示在按钮上
+  activeMcpCount: number;
+  connectedSkillCount: number;
+  connectedKnowledgeCount: number;
+  activeRegexCount: number;
   onExportData: () => void;
   onImportData: () => void;
 }
@@ -83,6 +88,10 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
   onOpenThemeModal,
   onOpenMcpModal,
   onOpenSkillModal,
+  activeMcpCount,
+  connectedSkillCount,
+  connectedKnowledgeCount,
+  activeRegexCount,
   onExportData,
   onImportData,
 }) => {
@@ -317,7 +326,14 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
               className="p-1 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 flex flex-col items-center gap-0.5"
               title="MCP 协议服务"
             >
-              <Server size={14} className="text-emerald-500" />
+              <div className="relative">
+                <Server size={14} className="text-emerald-500" />
+                {activeMcpCount > 0 && (
+                  <span className="absolute -top-1.5 -right-2 min-w-[13px] h-[13px] px-0.5 rounded-full bg-emerald-500 text-white text-[8px] leading-[13px] font-medium text-center">
+                    {activeMcpCount}
+                  </span>
+                )}
+              </div>
               <span className="text-[10px]">MCP</span>
             </button>
 
@@ -329,7 +345,14 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
               className="p-1 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 flex flex-col items-center gap-0.5"
               title="Agent 技能系统"
             >
-              <Zap size={14} className="text-amber-500" />
+              <div className="relative">
+                <Zap size={14} className="text-amber-500" />
+                {connectedSkillCount > 0 && (
+                  <span className="absolute -top-1.5 -right-2 min-w-[13px] h-[13px] px-0.5 rounded-full bg-amber-500 text-white text-[8px] leading-[13px] font-medium text-center">
+                    {connectedSkillCount}
+                  </span>
+                )}
+              </div>
               <span className="text-[10px]">Skill</span>
             </button>
 
@@ -341,7 +364,14 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
               className="p-1 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 flex flex-col items-center gap-0.5"
               title="本地知识库"
             >
-              <BookOpen size={14} className="text-blue-500" />
+              <div className="relative">
+                <BookOpen size={14} className="text-blue-500" />
+                {connectedKnowledgeCount > 0 && (
+                  <span className="absolute -top-1.5 -right-2 min-w-[13px] h-[13px] px-0.5 rounded-full bg-blue-500 text-white text-[8px] leading-[13px] font-medium text-center">
+                    {connectedKnowledgeCount}
+                  </span>
+                )}
+              </div>
               <span className="text-[10px]">知识库</span>
             </button>
 
@@ -353,7 +383,14 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
               className="p-1 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 flex flex-col items-center gap-0.5"
               title="正则规则"
             >
-              <Code2 size={14} className="text-purple-500" />
+              <div className="relative">
+                <Code2 size={14} className="text-purple-500" />
+                {activeRegexCount > 0 && (
+                  <span className="absolute -top-1.5 -right-2 min-w-[13px] h-[13px] px-0.5 rounded-full bg-purple-500 text-white text-[8px] leading-[13px] font-medium text-center">
+                    {activeRegexCount}
+                  </span>
+                )}
+              </div>
               <span className="text-[10px]">正则</span>
             </button>
 

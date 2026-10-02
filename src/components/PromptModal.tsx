@@ -313,7 +313,7 @@ export const PromptModal: React.FC<PromptModalProps> = ({
                             <span className="text-xs font-semibold text-slate-100">
                               {p.title}
                             </span>
-                            {p.tags.map((t) => (
+                            {(p.tags ?? []).map((t) => (
                               <span
                                 key={t}
                                 className="text-[10px] text-slate-400 font-mono"

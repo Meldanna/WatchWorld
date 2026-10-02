@@ -158,3 +158,132 @@ export async function pushToWebDav(
     };
   }
 }
+
+/* ------------------------------------------------------------------
+ * 增量同步：按窗口/图片分文件存放，只上传有改动的部分。
+ * 目录结构：
+ *   <root>/index.json            清单（各窗口与图片的 updatedAt）
+ *   <root>/windows/<id>.json     单个窗口的数据
+ *   <root>/media/<id>.json       单张图片
+ * ------------------------------------------------------------------ */
+
+export interface SyncManifest {
+  version: number;
+  updatedAt: number;
+  sessions: Record<string, { updatedAt: number; title?: string }>;
+  images: Record<string, { bytes: number; updatedAt: number; mime?: string }>;
+}
+
+export function emptyManifest(): SyncManifest {
+  return { version: 1, updatedAt: 0, sessions: {}, images: {} };
+}
+
+/** 同步根目录，默认 /guanjie/ */
+export function syncRoot(config: WebDavConfig): string {
+  const dir = config.syncRootDir || '/guanjie/';
+  const withSlash = dir.endsWith('/') ? dir : `${dir}/`;
+  return config.url.replace(/\/+$/, '') + withSlash;
+}
+
+function safeFileName(id: string): string {
+  return id.replace(/[^A-Za-z0-9._-]/g, '_');
+}
+
+async function putFile(
+  config: WebDavConfig,
+  url: string,
+  body: string
+): Promise<WebDavSyncResult> {
+  try {
+    const res = await callWebDavProxy(url, 'PUT', config, body);
+    if (res.ok || res.status === 201 || res.status === 204) {
+      return { success: true, message: 'ok', timestamp: Date.now() };
+    }
+    return { success: false, message: `PUT 失败 (${res.status})` };
+  } catch (err: any) {
+    return { success: false, message: err.message || '网络异常' };
+  }
+}
+
+async function getFile(config: WebDavConfig, url: string): Promise<string | null> {
+  try {
+    const res = await callWebDavProxy(url, 'GET', config);
+    if (!res.ok) return null;
+    return await res.text();
+  } catch {
+    return null;
+  }
+}
+
+/** 确保目录存在；MKCOL 在目录已存在时返回 405，一律忽略 */
+export async function ensureCollections(config: WebDavConfig): Promise<void> {
+  const root = syncRoot(config);
+  await callWebDavProxy(root, 'MKCOL', config).catch(() => undefined);
+  await callWebDavProxy(`${root}windows/`, 'MKCOL', config).catch(() => undefined);
+  await callWebDavProxy(`${root}media/`, 'MKCOL', config).catch(() => undefined);
+}
+
+export async function fetchManifest(config: WebDavConfig): Promise<SyncManifest | null> {
+  const text = await getFile(config, `${syncRoot(config)}index.json`);
+  if (!text) return null;
+  try {
+    const parsed = JSON.parse(text);
+    return { ...emptyManifest(), ...parsed };
+  } catch {
+    return null;
+  }
+}
+
+export async function pushManifest(
+  config: WebDavConfig,
+  manifest: SyncManifest
+): Promise<WebDavSyncResult> {
+  const next = { ...manifest, updatedAt: Date.now() };
+  const res = await putFile(config, `${syncRoot(config)}index.json`, JSON.stringify(next));
+  if (res.success) manifest.updatedAt = next.updatedAt;
+  return res;
+}
+
+export async function pushSessionFile(
+  config: WebDavConfig,
+  session: unknown
+): Promise<WebDavSyncResult> {
+  const s = session as { id: string };
+  return putFile(
+    config,
+    `${syncRoot(config)}windows/${safeFileName(s.id)}.json`,
+    JSON.stringify({ kind: 'session', payload: session })
+  );
+}
+
+export async function fetchSessionFile(config: WebDavConfig, id: string): Promise<unknown | null> {
+  const text = await getFile(config, `${syncRoot(config)}windows/${safeFileName(id)}.json`);
+  if (!text) return null;
+  try {
+    return JSON.parse(text)?.payload ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function pushImageFile(
+  config: WebDavConfig,
+  image: unknown
+): Promise<WebDavSyncResult> {
+  const img = image as { id: string };
+  return putFile(
+    config,
+    `${syncRoot(config)}media/${safeFileName(img.id)}.json`,
+    JSON.stringify({ kind: 'image', payload: image })
+  );
+}
+
+export async function fetchImageFile(config: WebDavConfig, id: string): Promise<unknown | null> {
+  const text = await getFile(config, `${syncRoot(config)}media/${safeFileName(id)}.json`);
+  if (!text) return null;
+  try {
+    return JSON.parse(text)?.payload ?? null;
+  } catch {
+    return null;
+  }
+}

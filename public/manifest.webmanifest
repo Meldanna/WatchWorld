@@ -1,0 +1,31 @@
+{
+  "name": "观界",
+  "short_name": "观界",
+  "description": "移动端多API智能工作台，支持自定义Agent、提示词库、窗口分组、AI消息显隐控制与分支重Roll回溯。",
+  "lang": "zh-CN",
+  "display": "standalone",
+  "start_url": "/",
+  "scope": "/",
+  "theme_color": "#0f172a",
+  "background_color": "#0f172a",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

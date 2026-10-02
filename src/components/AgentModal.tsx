@@ -63,7 +63,7 @@ export const AgentModal: React.FC<AgentModalProps> = ({
     setDescription(a.description);
     setSystemPrompt(a.systemPrompt);
     setTemperature(a.temperature ?? 0.7);
-    setTagsStr(a.tags.join(', '));
+    setTagsStr((a.tags ?? []).join(', '));
   };
 
   const handleSaveForm = (e: React.FormEvent) => {
@@ -100,25 +100,42 @@ export const AgentModal: React.FC<AgentModalProps> = ({
       />
 
       {/* Dialog */}
-      <div className="relative w-full max-w-xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-4 sm:p-5 z-10 max-h-[90vh] flex flex-col animate-in fade-in zoom-in-95 duration-150">
+      <div
+        className="relative w-full max-w-xl border rounded-2xl shadow-2xl p-4 sm:p-5 z-10 max-h-[90vh] flex flex-col animate-in fade-in zoom-in-95 duration-150"
+        style={{
+          backgroundColor: 'var(--surface-elevated)',
+          borderColor: 'var(--border-default)',
+        }}
+      >
         {/* Header */}
-        <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+        <div
+          className="flex items-center justify-between pb-3 border-b"
+          style={{ borderColor: 'var(--border-default)' }}
+        >
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-blue-500/10 border border-blue-500/30 flex items-center justify-center text-blue-400">
+            <div
+              className="w-8 h-8 rounded-xl border flex items-center justify-center"
+              style={{
+                backgroundColor: 'var(--accent-primary-alpha)',
+                borderColor: 'var(--accent-primary)',
+                color: 'var(--accent-primary)',
+              }}
+            >
               <Bot size={18} />
             </div>
             <div>
-              <h2 className="text-sm font-semibold text-slate-100">
-                Agent 角色中心
+              <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+                Agent 顾问中心
               </h2>
-              <p className="text-[11px] text-slate-400">
-                随时切换不同角色设定或创建专属智能体
+              <p className="text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
+                切换不同角色设定或创建专属顾问
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800"
+            className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            style={{ color: 'var(--text-secondary)' }}
           >
             <X size={18} />
           </button>
@@ -129,11 +146,12 @@ export const AgentModal: React.FC<AgentModalProps> = ({
           /* Create / Edit Form */
           <form
             onSubmit={handleSaveForm}
-            className="flex-1 overflow-y-auto py-3 space-y-3.5 text-xs text-slate-300"
+            className="flex-1 overflow-y-auto py-3 space-y-3.5 text-xs"
+            style={{ color: 'var(--text-secondary)' }}
           >
             <div className="flex items-center justify-between">
-              <h3 className="text-xs font-semibold text-emerald-400">
-                {isCreating ? '新建专属智能体' : `编辑智能体: ${editingAgent?.name}`}
+              <h3 className="text-xs font-semibold" style={{ color: 'var(--accent-primary)' }}>
+                {isCreating ? '新建专属顾问' : `编辑顾问: ${editingAgent?.name}`}
               </h3>
               <button
                 type="button"
@@ -141,7 +159,8 @@ export const AgentModal: React.FC<AgentModalProps> = ({
                   setIsCreating(false);
                   setEditingAgent(null);
                 }}
-                className="text-slate-400 hover:text-slate-200"
+                className="text-sm hover:underline"
+                style={{ color: 'var(--text-tertiary)' }}
               >
                 返回列表
               </button>
@@ -149,51 +168,66 @@ export const AgentModal: React.FC<AgentModalProps> = ({
 
             <div className="grid grid-cols-4 gap-2">
               <div className="col-span-1">
-                <label className="block text-[11px] text-slate-400 mb-1">
-                  头像 (Emoji)
+                <label className="block text-[11px] mb-1" style={{ color: 'var(--text-tertiary)' }}>
+                  头像
                 </label>
                 <input
                   type="text"
                   value={avatar}
                   onChange={(e) => setAvatar(e.target.value)}
                   maxLength={4}
-                  className="w-full bg-slate-950 text-center text-xl p-2 rounded-xl border border-slate-700 focus:outline-none focus:border-emerald-500"
+                  className="w-full text-center text-xl p-2 rounded-xl border focus:outline-none focus:ring-2"
+                  style={{
+                    backgroundColor: 'var(--surface-1)',
+                    borderColor: 'var(--border-default)',
+                    color: 'var(--text-primary)',
+                  }}
                 />
               </div>
               <div className="col-span-3">
-                <label className="block text-[11px] text-slate-400 mb-1">
-                  角色名称 *
+                <label className="block text-[11px] mb-1" style={{ color: 'var(--text-tertiary)' }}>
+                  顾问名称 *
                 </label>
                 <input
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="例如：论文评审专家、小红书文案手..."
+                  placeholder="例如：世界观推演师、剧情评估师..."
                   required
-                  className="w-full bg-slate-950 p-2.5 rounded-xl border border-slate-700 focus:outline-none focus:border-emerald-500 text-slate-100"
+                  className="w-full p-2.5 rounded-xl border focus:outline-none focus:ring-2"
+                  style={{
+                    backgroundColor: 'var(--surface-1)',
+                    borderColor: 'var(--border-default)',
+                    color: 'var(--text-primary)',
+                  }}
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-[11px] text-slate-400 mb-1">
+              <label className="block text-[11px] mb-1" style={{ color: 'var(--text-tertiary)' }}>
                 简介说明
               </label>
               <input
                 type="text"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="简述该角色的专业特长与适用场景..."
-                className="w-full bg-slate-950 p-2.5 rounded-xl border border-slate-700 focus:outline-none focus:border-emerald-500 text-slate-100"
+                placeholder="简述该顾问的专业特长与适用场景..."
+                className="w-full p-2.5 rounded-xl border focus:outline-none focus:ring-2"
+                style={{
+                  backgroundColor: 'var(--surface-1)',
+                  borderColor: 'var(--border-default)',
+                  color: 'var(--text-primary)',
+                }}
               />
             </div>
 
             <div>
               <div className="flex items-center justify-between mb-1">
-                <label className="text-[11px] text-slate-400">
+                <label className="text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
                   系统提示词 (System Prompt) *
                 </label>
-                <span className="text-[10px] text-slate-500">
+                <span className="text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
                   决定回答风格与思考链路
                 </span>
               </div>
@@ -203,14 +237,19 @@ export const AgentModal: React.FC<AgentModalProps> = ({
                 placeholder="你是一名资深的... 在回答时请遵循以下原则..."
                 rows={5}
                 required
-                className="w-full bg-slate-950 p-2.5 rounded-xl border border-slate-700 focus:outline-none focus:border-emerald-500 text-slate-100 resize-y leading-relaxed font-mono text-[12px]"
+                className="w-full p-2.5 rounded-xl border focus:outline-none focus:ring-2 resize-y leading-relaxed font-mono text-[12px]"
+                style={{
+                  backgroundColor: 'var(--surface-1)',
+                  borderColor: 'var(--border-default)',
+                  color: 'var(--text-primary)',
+                }}
               />
             </div>
 
             <div className="grid grid-cols-2 gap-3 items-center">
               <div>
-                <div className="flex justify-between text-[11px] text-slate-400 mb-1">
-                  <span>发散度 (Temperature): {temperature}</span>
+                <div className="flex justify-between text-[11px] mb-1" style={{ color: 'var(--text-tertiary)' }}>
+                  <span>发散度: {temperature}</span>
                 </div>
                 <input
                   type="range"
@@ -219,39 +258,53 @@ export const AgentModal: React.FC<AgentModalProps> = ({
                   step="0.05"
                   value={temperature}
                   onChange={(e) => setTemperature(parseFloat(e.target.value))}
-                  className="w-full accent-emerald-500"
+                  className="w-full"
+                  style={{ accentColor: 'var(--accent-primary)' }}
                 />
               </div>
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">
-                  标签 (以逗号分隔)
+                <label className="block text-[11px] mb-1" style={{ color: 'var(--text-tertiary)' }}>
+                  标签 (逗号分隔)
                 </label>
                 <input
                   type="text"
                   value={tagsStr}
                   onChange={(e) => setTagsStr(e.target.value)}
-                  placeholder="如：写作, 幽默, 推荐"
-                  className="w-full bg-slate-950 p-2 rounded-xl border border-slate-700 focus:outline-none focus:border-emerald-500 text-slate-100"
+                  placeholder="如：世界观, 剧情, 角色"
+                  className="w-full p-2 rounded-xl border focus:outline-none focus:ring-2"
+                  style={{
+                    backgroundColor: 'var(--surface-1)',
+                    borderColor: 'var(--border-default)',
+                    color: 'var(--text-primary)',
+                  }}
                 />
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+            <div className="flex justify-end gap-2 pt-2 border-t" style={{ borderColor: 'var(--border-default)' }}>
               <button
                 type="button"
                 onClick={() => {
                   setIsCreating(false);
                   setEditingAgent(null);
                 }}
-                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300"
+                className="px-3 py-1.5 rounded-lg hover:opacity-80 transition-opacity"
+                style={{
+                  backgroundColor: 'var(--surface-2)',
+                  color: 'var(--text-secondary)',
+                }}
               >
                 取消
               </button>
               <button
                 type="submit"
-                className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium shadow-md shadow-emerald-950"
+                className="px-4 py-1.5 rounded-lg font-medium shadow-md hover:opacity-90 transition-opacity"
+                style={{
+                  backgroundColor: 'var(--accent-primary)',
+                  color: 'white',
+                }}
               >
-                保存智能体
+                保存顾问
               </button>
             </div>
           </form>
@@ -259,13 +312,18 @@ export const AgentModal: React.FC<AgentModalProps> = ({
           /* Agent List View */
           <div className="flex-1 overflow-y-auto py-3 space-y-2.5">
             <div className="flex items-center justify-between px-1 mb-1">
-              <span className="text-xs text-slate-400">可用 Agent 列表</span>
+              <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>可用顾问列表</span>
               <button
                 onClick={startCreate}
-                className="flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 font-medium py-1 px-2.5 rounded-lg bg-emerald-950/40 border border-emerald-500/30"
+                className="flex items-center gap-1 text-xs font-medium py-1 px-2.5 rounded-lg border transition-all hover:opacity-80"
+                style={{
+                  color: 'var(--accent-primary)',
+                  backgroundColor: 'var(--accent-primary-alpha)',
+                  borderColor: 'var(--accent-primary)',
+                }}
               >
                 <Plus size={14} />
-                <span>新建 Agent</span>
+                <span>新建顾问</span>
               </button>
             </div>
 
@@ -279,11 +337,12 @@ export const AgentModal: React.FC<AgentModalProps> = ({
                     onSelectAgent(agent.id);
                     onClose();
                   }}
-                  className={`p-3 rounded-xl border cursor-pointer transition-all flex items-start gap-3 ${
-                    isActive
-                      ? 'bg-slate-800/90 border-emerald-500/80 shadow-md ring-1 ring-emerald-500/30'
-                      : 'bg-slate-950/60 border-slate-800/80 hover:bg-slate-800/40 hover:border-slate-700'
-                  }`}
+                  className={`p-3 rounded-xl border cursor-pointer transition-all flex items-start gap-3`}
+                  style={{
+                    backgroundColor: isActive ? 'var(--surface-2)' : 'var(--surface-1)',
+                    borderColor: isActive ? 'var(--accent-primary)' : 'var(--border-default)',
+                    boxShadow: isActive ? '0 0 0 1px var(--accent-primary-alpha)' : 'none',
+                  }}
                 >
                   <div className="text-2xl mt-0.5 shrink-0 select-none">
                     {agent.avatar}
@@ -292,26 +351,31 @@ export const AgentModal: React.FC<AgentModalProps> = ({
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-0.5">
                       <span
-                        className={`text-xs font-semibold ${
-                          isActive ? 'text-emerald-400' : 'text-slate-100'
-                        }`}
+                        className="text-xs font-semibold"
+                        style={{ color: isActive ? 'var(--accent-primary)' : 'var(--text-primary)' }}
                       >
                         {agent.name}
                       </span>
-                      {agent.tags.map((t) => (
-                        <span key={t} className="text-[10px] text-slate-400 font-mono">
+                      {(agent.tags ?? []).map((t) => (
+                        <span key={t} className="text-[10px] font-mono" style={{ color: 'var(--text-tertiary)' }}>
                           · {t}
                         </span>
                       ))}
                     </div>
-                    <p className="text-[11px] text-slate-400 line-clamp-2 leading-relaxed">
+                    <p className="text-[11px] line-clamp-2 leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
                       {agent.description}
                     </p>
                   </div>
 
                   <div className="flex items-center gap-1 shrink-0 ml-1">
                     {isActive ? (
-                      <div className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center mr-1">
+                      <div
+                        className="w-5 h-5 rounded-full flex items-center justify-center mr-1"
+                        style={{
+                          backgroundColor: 'var(--accent-primary-alpha)',
+                          color: 'var(--accent-primary)',
+                        }}
+                      >
                         <Check size={13} />
                       </div>
                     ) : null}
@@ -321,7 +385,8 @@ export const AgentModal: React.FC<AgentModalProps> = ({
                         e.stopPropagation();
                         startEdit(agent);
                       }}
-                      className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200"
+                      className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                      style={{ color: 'var(--text-tertiary)' }}
                       title="编辑"
                     >
                       <Edit2 size={13} />
@@ -331,11 +396,12 @@ export const AgentModal: React.FC<AgentModalProps> = ({
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          if (confirm(`确认删除 Agent「${agent.name}」？`)) {
+                          if (confirm(`确认删除顾问「${agent.name}」？`)) {
                             onDeleteAgent(agent.id);
                           }
                         }}
-                        className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-rose-400"
+                        className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors hover:text-rose-500"
+                        style={{ color: 'var(--text-tertiary)' }}
                         title="删除"
                       >
                         <Trash2 size={13} />
